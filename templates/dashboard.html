@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strava 控制台</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        html, body {
+            height: 100%;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f5f5;
+        }
+
+        /* 圣杯布局：header + 三栏主体 + footer */
+        .layout {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: #fc4c02;
+            color: white;
+            padding: 16px 24px;
+            font-size: 18px;
+            font-weight: bold;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+            flex-shrink: 0;
+        }
+
+        .body {
+            display: flex;
+            flex: 1;
+            min-height: 0;
+        }
+
+        /* 左侧菜单栏 */
+        .sidebar-left {
+            width: 240px;
+            background: #2c2c2c;
+            color: white;
+            padding: 20px;
+            flex-shrink: 0;
+            overflow-y: auto;
+        }
+
+        .menu-title {
+            font-size: 14px;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 16px;
+        }
+
+        .menu-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .menu-item {
+            width: 100%;
+            padding: 12px 14px;
+            background: transparent;
+            color: white;
+            border: 1px solid #444;
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: left;
+            font-size: 14px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .menu-item:hover:not(:disabled):not(.active) {
+            background: #3a3a3a;
+            border-color: #666;
+        }
+
+        .menu-item.active {
+            background: #fc4c02;
+            border-color: #fc4c02;
+            color: white;
+        }
+
+        .menu-item:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .menu-badge {
+            font-size: 11px;
+            color: #aaa;
+        }
+
+        /* 中间主要内容区 */
+        .main {
+            flex: 1;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .content-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .content-header h2 {
+            margin: 0;
+            font-size: 20px;
+            color: #333;
+        }
+
+        .content-body {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            padding: 20px;
+            overflow: auto;
+            min-height: 300px;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .content-body.empty {
+            color: #999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* 数据表格 */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e8e8e8;
+            text-align: left;
+        }
+
+        .data-table th {
+            background: #f8f8f8;
+            font-weight: 600;
+            color: #333;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .data-table tbody tr:hover {
+            background: #fafafa;
+        }
+
+        .data-table td {
+            color: #444;
+        }
+
+        .text-right {
+            text-align: right !important;
+        }
+
+        /* 右侧信息栏 */
+        .sidebar-right {
+            width: 280px;
+            background: white;
+            border-left: 1px solid #e0e0e0;
+            padding: 20px;
+            flex-shrink: 0;
+            overflow-y: auto;
+        }
+
+        .panel-title {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+
+        .token-item {
+            margin-bottom: 14px;
+        }
+
+        .token-label {
+            font-size: 12px;
+            color: #999;
+            margin-bottom: 4px;
+        }
+
+        .token-value {
+            font-size: 12px;
+            color: #333;
+            word-break: break-all;
+            background: #f8f8f8;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: Menlo, Monaco, Consolas, monospace;
+        }
+
+        .footer {
+            background: #2c2c2c;
+            color: #888;
+            padding: 12px 24px;
+            text-align: center;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+
+        .btn-back {
+            padding: 6px 14px;
+            background: #eee;
+            color: #333;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .btn-back:hover {
+            background: #ddd;
+        }
+    </style>
+</head>
+<body>
+    <div class="layout">
+        <header class="header">Strava 控制台</header>
+
+        <div class="body">
+            <!-- 左侧菜单栏 -->
+            <aside class="sidebar-left">
+                <div class="menu-title">功能菜单</div>
+                <div class="menu-list">
+                    <button class="menu-item active" onclick="loadAthlete(this)">
+                        运动员信息
+                    </button>
+                    <button class="menu-item" onclick="loadActivities(this)">
+                        活动列表
+                    </button>
+                    <button class="menu-item" disabled>
+                        好友列表 <span class="menu-badge">预留</span>
+                    </button>
+                    <button class="menu-item" disabled>
+                        俱乐部 <span class="menu-badge">预留</span>
+                    </button>
+                    <button class="menu-item" disabled>
+                        装备信息 <span class="menu-badge">预留</span>
+                    </button>
+                </div>
+            </aside>
+
+            <!-- 中间内容区 -->
+            <main class="main">
+                <div class="content-header">
+                    <h2 id="page-title">运动员信息</h2>
+                    <button class="btn-back" onclick="location.href='/'">返回登录页</button>
+                </div>
+                <div class="content-body empty" id="result">点击左侧菜单调用接口...</div>
+            </main>
+
+            <!-- 右侧信息栏 -->
+            <aside class="sidebar-right">
+                <div class="panel-title">授权信息</div>
+                <div class="token-item">
+                    <div class="token-label">Client ID</div>
+                    <div class="token-value">{{ client_id }}</div>
+                </div>
+                <div class="token-item">
+                    <div class="token-label">Code</div>
+                    <div class="token-value">{{ code }}</div>
+                </div>
+                <div class="token-item">
+                    <div class="token-label">Access Token</div>
+                    <div class="token-value">{{ access_token }}</div>
+                </div>
+                <div class="token-item">
+                    <div class="token-label">Refresh Token</div>
+                    <div class="token-value">{{ refresh_token }}</div>
+                </div>
+            </aside>
+        </div>
+
+        <footer class="footer">Strava Demo App</footer>
+    </div>
+
+    <script>
+        const resultEl = document.getElementById('result');
+        const pageTitleEl = document.getElementById('page-title');
+
+        function setActiveMenu(btn) {
+            document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+            if (btn) btn.classList.add('active');
+        }
+
+        function setLoading(title) {
+            pageTitleEl.textContent = title;
+            resultEl.innerHTML = '正在获取...';
+            resultEl.classList.remove('empty');
+        }
+
+        function setError(title, message) {
+            pageTitleEl.textContent = title;
+            resultEl.textContent = message;
+            resultEl.classList.remove('empty');
+        }
+
+        function setHtml(title, html) {
+            pageTitleEl.textContent = title;
+            resultEl.innerHTML = html;
+            resultEl.classList.remove('empty');
+        }
+
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '-';
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
+        function formatDate(iso) {
+            if (!iso) return '-';
+            return new Date(iso).toLocaleString('zh-CN');
+        }
+
+        function formatDistance(meters) {
+            if (meters === null || meters === undefined) return '-';
+            return (meters / 1000).toFixed(2) + ' km';
+        }
+
+        function formatTime(seconds) {
+            if (seconds === null || seconds === undefined) return '-';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) return `${h}h ${m}m ${s}s`;
+            return `${m}m ${s}s`;
+        }
+
+        function formatElevation(meters) {
+            if (meters === null || meters === undefined) return '-';
+            return meters.toFixed(0) + ' m';
+        }
+
+        function formatSpeed(mps) {
+            if (mps === null || mps === undefined) return '-';
+            return (mps * 3.6).toFixed(1) + ' km/h';
+        }
+
+        function formatCadence(value) {
+            if (value === null || value === undefined) return '-';
+            return value.toFixed(0) + ' rpm';
+        }
+
+        function formatSufferScore(value) {
+            if (value === null || value === undefined) return '-';
+            return value.toFixed(0);
+        }
+
+        function formatHeartRate(value) {
+            if (value === null || value === undefined) return '-';
+            return value.toFixed(0) + ' bpm';
+        }
+
+        function formatWatts(value) {
+            if (value === null || value === undefined) return '-';
+            return value.toFixed(0) + ' W';
+        }
+
+        async function loadAthlete(btn) {
+            setActiveMenu(btn);
+            setLoading('运动员信息');
+
+            try {
+                const res = await fetch('/athlete');
+                const data = await res.json();
+                if (res.ok) {
+                    setHtml('运动员信息', '<pre>' + escapeHtml(JSON.stringify(data, null, 2)) + '</pre>');
+                } else {
+                    setError('运动员信息', '获取失败: ' + (data.error || '未知错误'));
+                }
+            } catch (err) {
+                setError('运动员信息', '请求出错: ' + err.message);
+            }
+        }
+
+        function buildActivityTable(activities) {
+            const rows = activities.map(a => `
+                <tr>
+                    <td>${escapeHtml(a.id)}</td>
+                    <td>${escapeHtml(a.name)}</td>
+                    <td>${escapeHtml(a.type)}</td>
+                    <td>${escapeHtml(a.sport_type)}</td>
+                    <td>${formatDate(a.start_date)}</td>
+                    <td class="text-right">${formatDistance(a.distance)}</td>
+                    <td class="text-right">${formatTime(a.moving_time)}</td>
+                    <td class="text-right">${formatElevation(a.total_elevation_gain)}</td>
+                    <td class="text-right">${formatSpeed(a.average_speed)}</td>
+                    <td class="text-right">${formatSpeed(a.max_speed)}</td>
+                    <td class="text-right">${formatCadence(a.average_cadence)}</td>
+                    <td class="text-right">${formatHeartRate(a.average_heartrate)}</td>
+                    <td class="text-right">${formatHeartRate(a.max_heartrate)}</td>
+                    <td class="text-right">${formatWatts(a.average_watts)}</td>
+                    <td class="text-right">${formatWatts(a.weighted_average_watts)}</td>
+                    <td class="text-right">${formatWatts(a.max_watts)}</td>
+                    <td class="text-right">${formatSufferScore(a.suffer_score)}</td>
+                </tr>
+            `).join('');
+
+            return `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>名称</th>
+                            <th>类型</th>
+                            <th>运动类型</th>
+                            <th>开始时间</th>
+                            <th class="text-right">距离</th>
+                            <th class="text-right">移动时间</th>
+                            <th class="text-right">爬升</th>
+                            <th class="text-right">平均速度</th>
+                            <th class="text-right">最大速度</th>
+                            <th class="text-right">平均踏频</th>
+                            <th class="text-right">平均心率</th>
+                            <th class="text-right">最大心率</th>
+                            <th class="text-right">平均功率</th>
+                            <th class="text-right">标准化功率</th>
+                            <th class="text-right">最大功率</th>
+                            <th class="text-right">强度评分</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            `;
+        }
+
+        async function loadActivities(btn) {
+            setActiveMenu(btn);
+            setLoading('活动列表（正在同步，请稍候）...');
+
+            try {
+                const res = await fetch('/activities');
+                const data = await res.json();
+                if (!res.ok) {
+                    setError('活动列表', '获取失败: ' + (data.error || '未知错误'));
+                    return;
+                }
+
+                if (!Array.isArray(data) || data.length === 0) {
+                    pageTitleEl.textContent = '活动列表';
+                    resultEl.textContent = '暂无活动数据';
+                    resultEl.classList.add('empty');
+                    return;
+                }
+
+                setHtml('活动列表', buildActivityTable(data));
+            } catch (err) {
+                setError('活动列表', '请求出错: ' + err.message);
+            }
+        }
+    </script>
+</body>
+</html>

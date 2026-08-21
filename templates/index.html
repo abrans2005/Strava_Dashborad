@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strava 授权</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 520px;
+            width: 90%;
+        }
+
+        h1 {
+            margin-bottom: 24px;
+            color: #333;
+        }
+
+        .form-group {
+            text-align: left;
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            color: #555;
+            font-size: 14px;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #fc4c02;
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            margin: 20px 0 0;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-connect {
+            background: #fc4c02;
+            color: white;
+        }
+
+        .btn-connect:hover {
+            background: #e04400;
+        }
+
+        #result {
+            margin-top: 20px;
+            text-align: left;
+            background: #fff0f0;
+            padding: 15px;
+            border-radius: 8px;
+            color: #c00;
+            font-size: 14px;
+            line-height: 1.6;
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Strava 授权</h1>
+
+        <div class="form-group">
+            <label for="client_id">Client ID</label>
+            <input type="text" id="client_id" value="{{ default_client_id }}" placeholder="请输入 Client ID">
+        </div>
+
+        <div class="form-group">
+            <label for="client_secret">Client Secret</label>
+            <input type="password" id="client_secret" value="{{ default_client_secret }}"
+                placeholder="请输入 Client Secret">
+        </div>
+
+        <button class="btn-connect" onclick="connect()">连接并获取 Token</button>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const resultEl = document.getElementById('result');
+
+        function showResult(text) {
+            resultEl.textContent = text;
+            resultEl.style.display = 'block';
+        }
+
+        function getInput(id) {
+            return document.getElementById(id).value.trim();
+        }
+
+        async function connect() {
+            const client_id = getInput('client_id');
+            const client_secret = getInput('client_secret');
+
+            if (!client_id || !client_secret) {
+                showResult('请先填写 Client ID 和 Client Secret');
+                return;
+            }
+
+            try {
+                const res = await fetch('/configure', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ client_id, client_secret })
+                });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    showResult('配置失败: ' + (data.error || '未知错误'));
+                    return;
+                }
+
+                window.open(data.url, '_blank');
+                showResult('已在浏览器新标签页打开 Strava 授权页面。\n授权完成后会自动跳转到运动员信息页面。');
+            } catch (err) {
+                showResult('出错: ' + err.message);
+            }
+        }
+
+        // 展示后端通过 URL 传回的错误信息
+        const urlParams = new URLSearchParams(window.location.search);
+        const backendError = urlParams.get('error');
+        if (backendError) {
+            showResult('授权失败: ' + backendError);
+        }
+    </script>
+</body>
+
+</html>
