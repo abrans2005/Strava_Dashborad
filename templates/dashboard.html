@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,7 +9,9 @@
         * {
             box-sizing: border-box;
         }
-        html, body {
+
+        html,
+        body {
             height: 100%;
             margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -48,9 +51,27 @@
             overflow-y: auto;
         }
 
-        .menu-title {
-            font-size: 14px;
+        .table-scroll {
+            overflow: auto;
+            max-height: 68vh;
+            /* 提高表格可视高度，适应大部分显示器 */
             color: #aaa;
+
+            /* 授权信息面板：位于主内容区下方，靠右自适应 */
+            .auth-panel {
+                display: flex;
+                justify-content: flex-end;
+                padding-top: 12px;
+            }
+
+            .auth-card {
+                background: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+                padding: 16px;
+                width: clamp(240px, 24vw, 360px);
+            }
+
             text-transform: uppercase;
             letter-spacing: 1px;
             margin-bottom: 16px;
@@ -173,6 +194,31 @@
             color: #444;
         }
 
+        /* 表格可横向滚动容器与顶部可见横向滚动条 */
+        .table-scroll-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .h-scrollbar {
+            overflow-x: auto;
+            overflow-y: hidden;
+            height: 14px;
+            background: transparent;
+        }
+
+        .h-scroll-inner {
+            height: 1px;
+            /* 只用来撑宽度显示滚动条 */
+        }
+
+        .table-scroll {
+            overflow: auto;
+            max-height: 60vh;
+            /* 限制高度以便在长表格时始终显示横向滚动条 */
+        }
+
         .text-right {
             text-align: right !important;
         }
@@ -238,6 +284,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="layout">
         <header class="header">Strava 控制台</header>
@@ -269,36 +316,42 @@
             <main class="main">
                 <div class="content-header">
                     <h2 id="page-title">运动员信息</h2>
-                    <button class="btn-back" onclick="location.href='/'">返回登录页</button>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <button class="btn-back" onclick="location.href='/'">返回登录页</button>
+                        <button class="btn-back" id="btn-chart" onclick="loadChart()">图表分析</button>
+                    </div>
                 </div>
                 <div class="content-body empty" id="result">点击左侧菜单调用接口...</div>
-            </main>
 
-            <!-- 右侧信息栏 -->
-            <aside class="sidebar-right">
-                <div class="panel-title">授权信息</div>
-                <div class="token-item">
-                    <div class="token-label">Client ID</div>
-                    <div class="token-value">{{ client_id }}</div>
+                <!-- 授权信息（已移动到内容区下方，靠右自适应显示） -->
+                <div class="auth-panel">
+                    <div class="auth-card">
+                        <div class="panel-title">授权信息</div>
+                        <div class="token-item">
+                            <div class="token-label">Client ID</div>
+                            <div class="token-value">{{ client_id }}</div>
+                        </div>
+                        <div class="token-item">
+                            <div class="token-label">Code</div>
+                            <div class="token-value">{{ code }}</div>
+                        </div>
+                        <div class="token-item">
+                            <div class="token-label">Access Token</div>
+                            <div class="token-value">{{ access_token }}</div>
+                        </div>
+                        <div class="token-item">
+                            <div class="token-label">Refresh Token</div>
+                            <div class="token-value">{{ refresh_token }}</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="token-item">
-                    <div class="token-label">Code</div>
-                    <div class="token-value">{{ code }}</div>
-                </div>
-                <div class="token-item">
-                    <div class="token-label">Access Token</div>
-                    <div class="token-value">{{ access_token }}</div>
-                </div>
-                <div class="token-item">
-                    <div class="token-label">Refresh Token</div>
-                    <div class="token-value">{{ refresh_token }}</div>
-                </div>
-            </aside>
+            </main>
         </div>
 
         <footer class="footer">Strava Demo App</footer>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         const resultEl = document.getElementById('result');
         const pageTitleEl = document.getElementById('page-title');
@@ -399,6 +452,200 @@
             }
         }
 
+        // --- Chart front-end: controls, fetch /chart and render with Chart.js ---
+        let chartInstance = null;
+
+        function buildChartControls() {
+            return `
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+                    <label>Year:
+                        <select id="chart-year">
+                            <option value="">全部</option>
+                        </select>
+                    </label>
+                    <label>Month:
+                        <select id="chart-month">
+                            <option value="">全部</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8">8</option>
+                            <option value="9">9</option>
+                            <option value="10">10</option>
+                            <option value="11">11</option>
+                            <option value="12">12</option>
+                        </select>
+                    </label>
+                    <label>Metric:
+                        <select id="chart-metric">
+                            <option value="count">次数</option>
+                            <option value="distance_km" selected>距离 (km)</option>
+                            <option value="moving_time_hours">移动时长 (h)</option>
+                            <option value="elevation_gain_m">爬升 (m)</option>
+                        </select>
+                    </label>
+                    <button class="btn-back" id="chart-run">查询</button>
+                </div>
+                <div id="chart-summary" style="margin-bottom:12px;color:#333;"></div>
+                <div style="background:#fff;padding:12px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
+                    <canvas id="chartCanvas" height="240"></canvas>
+                </div>
+            `;
+        }
+
+        async function loadChart(btn) {
+            setActiveMenu(btn);
+            setLoading('图表分析');
+
+            setHtml('图表分析', buildChartControls());
+
+            // 动态填充 Year 选项
+            try {
+                const yearsRes = await fetch('/chart/years');
+                const yearsData = await yearsRes.json();
+                if (Array.isArray(yearsData.years)) {
+                    const sel = document.getElementById('chart-year');
+                    yearsData.years.forEach(y => {
+                        const opt = document.createElement('option');
+                        opt.value = String(y);
+                        opt.textContent = String(y);
+                        sel.appendChild(opt);
+                    });
+                }
+            } catch (e) {
+                // ignore failure, keep default
+            }
+
+            document.getElementById('chart-run').addEventListener('click', async () => {
+                const year = document.getElementById('chart-year').value;
+                const month = document.getElementById('chart-month').value;
+                const metric = document.getElementById('chart-metric').value;
+                await fetchAndRenderStats(year, month, metric);
+            });
+
+            // 默认立即查询一次
+            await fetchAndRenderStats('', '', 'distance_km');
+        }
+
+        async function fetchAndRenderStats(year, month, metric) {
+            try {
+                let qs = [];
+                if (year) qs.push('year=' + encodeURIComponent(year));
+                if (month) qs.push('month=' + encodeURIComponent(month));
+                if (metric) qs.push('metric=' + encodeURIComponent(metric));
+                const url = '/chart' + (qs.length ? ('?' + qs.join('&')) : '');
+                const res = await fetch(url);
+                const data = await res.json();
+                if (!res.ok) {
+                    setError('图表分析', '获取失败: ' + (data.error || '未知错误'));
+                    return;
+                }
+
+                const summaryEl = document.getElementById('chart-summary');
+                if (data.summary) {
+                    summaryEl.textContent = `汇总： 共 ${data.summary.count} 次，距离 ${data.summary.distance_km} km，移动时长 ${data.summary.moving_time_hours} 小时，总爬升 ${data.summary.elevation_gain_m} m`;
+                } else {
+                    summaryEl.textContent = '';
+                }
+
+                const labels = data.labels || [];
+                const values = (data.values || []).map(v => Number(v) || 0);
+
+                if (!labels.length || !values.length) {
+                    setError('图表分析', '无可用数据用于绘图');
+                    return;
+                }
+
+                renderChart(labels, values, metric || data.metric || 'metric');
+            } catch (err) {
+                setError('图表分析', '请求出错: ' + err.message);
+            }
+        }
+
+        function renderChart(labels, values, metric) {
+            const ctx = document.getElementById('chartCanvas').getContext('2d');
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+            }
+
+            const isElevation = metric === 'elevation_gain_m';
+            const cfg = {
+                type: isElevation ? 'line' : 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: metric,
+                        data: values,
+                        backgroundColor: isElevation ? 'rgba(255,99,132,0.2)' : 'rgba(54, 162, 235, 0.6)',
+                        borderColor: isElevation ? 'rgba(255,99,132,1)' : 'rgba(54,162,235,1)',
+                        fill: isElevation ? false : true,
+                        tension: isElevation ? 0.3 : 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { ticks: { color: '#333' } },
+                        y: { beginAtZero: true, ticks: { color: '#333' } }
+                    },
+                }
+            };
+
+            chartInstance = new Chart(ctx, cfg);
+        }
+
+        // Wrap a table HTML with scroll containers: a top horizontal scrollbar and the actual scroll area
+        function buildScrollableTable(html) {
+            return `
+                <div class="table-scroll-wrap">
+                    <div class="h-scrollbar"><div class="h-scroll-inner"></div></div>
+                    <div class="table-scroll">${html}</div>
+                </div>
+            `;
+        }
+
+        // Initialize scroll syncing between the visible top scrollbar and the table scroll area
+        function initTableScrollSync() {
+            const wraps = resultEl.querySelectorAll('.table-scroll-wrap');
+            wraps.forEach(wrap => {
+                const hScroll = wrap.querySelector('.h-scrollbar');
+                const hInner = wrap.querySelector('.h-scroll-inner');
+                const tableScroll = wrap.querySelector('.table-scroll');
+                const table = tableScroll.querySelector('.data-table');
+                if (!hScroll || !hInner || !tableScroll || !table) return;
+
+                // set inner width to table scroll width so scrollbar appears
+                const update = () => {
+                    hInner.style.width = table.scrollWidth + 'px';
+                };
+
+                // Initial update and on resize
+                update();
+                window.addEventListener('resize', update);
+
+                let isSyncing = false;
+                tableScroll.addEventListener('scroll', () => {
+                    if (isSyncing) return;
+                    isSyncing = true;
+                    hScroll.scrollLeft = tableScroll.scrollLeft;
+                    requestAnimationFrame(() => { isSyncing = false; });
+                });
+
+                hScroll.addEventListener('scroll', () => {
+                    if (isSyncing) return;
+                    isSyncing = true;
+                    tableScroll.scrollLeft = hScroll.scrollLeft;
+                    requestAnimationFrame(() => { isSyncing = false; });
+                });
+            });
+        }
+
         function buildActivityTable(activities) {
             const rows = activities.map(a => `
                 <tr>
@@ -469,11 +716,14 @@
                     return;
                 }
 
-                setHtml('活动列表', buildActivityTable(data));
+                setHtml('活动列表', buildScrollableTable(buildActivityTable(data)));
+                // 初始化并同步滚动条
+                initTableScrollSync();
             } catch (err) {
                 setError('活动列表', '请求出错: ' + err.message);
             }
         }
     </script>
 </body>
+
 </html>

@@ -379,6 +379,70 @@ def get_stats():
     )
 
 
+@app.route("/chart")
+def chart():
+    """为前端图表返回时间序列数据。
+
+    请求参数:
+    - year: 可选，指定年份（int），则返回该年每月的聚合指标（1-12 月）
+    - metric: 可选，指标名，支持 `count`、`distance_km`、`moving_time_hours`（默认 `distance_km`）
+    """
+    cache = load_cache()
+    activities = cache.get("activities", [])
+
+    year = request.args.get("year", type=int)
+    metric = request.args.get("metric", "distance_km")
+    if metric not in {"count", "distance_km", "moving_time_hours", "elevation_gain_m"}:
+        return jsonify({"error": "unsupported metric"}), 400
+
+    # 过滤函数
+    def has_date(a):
+        return bool(a.get("start_date"))
+
+    # 若指定年份，按每月聚合（保证 12 个月都有值）
+    if year:
+        labels = [f"{year}-{m:02d}" for m in range(1, 13)]
+        values = []
+        for m in range(1, 13):
+            month_acts = [a for a in activities if has_date(a) and datetime.fromisoformat(a["start_date"]).year == year and datetime.fromisoformat(a["start_date"]).month == m]
+            agg = aggregate_activities(month_acts)
+            values.append(agg.get(metric, 0))
+
+        summary = aggregate_activities([a for a in activities if has_date(a) and datetime.fromisoformat(a["start_date"]).year == year])
+        return jsonify({"labels": labels, "values": values, "metric": metric, "summary": summary})
+
+    # 未指定年份：使用按月分组（跨年），按年月作为标签
+    by_month = group_activities_by(activities, lambda a: datetime.fromisoformat(a["start_date"]).strftime("%Y-%m"))
+    # group_activities_by 返回按 key 倒序，这里按升序排序以便时间轴从早到晚
+    by_month_sorted = sorted(by_month, key=lambda x: x["key"]) if by_month else []
+
+    labels = [x["key"] for x in by_month_sorted]
+    values = [x.get(metric, 0) for x in by_month_sorted]
+
+    summary = aggregate_activities([a for a in activities if has_date(a)])
+    return jsonify({"labels": labels, "values": values, "metric": metric, "summary": summary})
+
+
+@app.route('/chart/years')
+def chart_years():
+    """返回活动中出现过的年份列表，降序排列。"""
+    cache = load_cache()
+    activities = cache.get('activities', [])
+    years = set()
+    for a in activities:
+        sd = a.get('start_date')
+        if not sd:
+            continue
+        try:
+            y = datetime.fromisoformat(sd).year
+            years.add(y)
+        except Exception:
+            continue
+
+    sorted_years = sorted(years, reverse=True)
+    return jsonify({'years': sorted_years})
+
+
 def auto_sync_loop():
     """后台线程：每隔 AUTO_SYNC_INTERVAL_SECONDS 执行一次增量同步。"""
     while True:
