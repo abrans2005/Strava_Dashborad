@@ -16,9 +16,10 @@
             margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background: #f5f5f5;
+            color: #333;
         }
 
-        /* 圣杯布局：header + 三栏主体 + footer */
+        /* 圣杯布局：header + 主体 + footer */
         .layout {
             display: flex;
             flex-direction: column;
@@ -51,27 +52,9 @@
             overflow-y: auto;
         }
 
-        .table-scroll {
-            overflow: auto;
-            max-height: 68vh;
-            /* 提高表格可视高度，适应大部分显示器 */
-            color: #aaa;
-
-            /* 授权信息面板：位于主内容区下方，靠右自适应 */
-            .auth-panel {
-                display: flex;
-                justify-content: flex-end;
-                padding-top: 12px;
-            }
-
-            .auth-card {
-                background: white;
-                border-radius: 8px;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-                padding: 16px;
-                width: clamp(240px, 24vw, 360px);
-            }
-
+        .menu-title {
+            font-size: 12px;
+            color: #888;
             text-transform: uppercase;
             letter-spacing: 1px;
             margin-bottom: 16px;
@@ -145,8 +128,8 @@
         .content-body {
             flex: 1;
             background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
             padding: 20px;
             overflow: auto;
             min-height: 300px;
@@ -160,6 +143,143 @@
             display: flex;
             align-items: center;
             justify-content: center;
+        }
+
+        /* 查询条件栏 */
+        .filter-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            align-items: flex-end;
+            margin-bottom: 20px;
+            padding: 16px;
+            background: #fafafa;
+            border: 1px solid #ebebeb;
+            border-radius: 10px;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .filter-group label {
+            font-size: 12px;
+            color: #666;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .filter-group select {
+            min-width: 140px;
+            padding: 8px 28px 8px 12px;
+            border: 1px solid #d0d0d0;
+            border-radius: 8px;
+            background: #fff;
+            font-size: 14px;
+            color: #333;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            cursor: pointer;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .filter-group select:hover {
+            border-color: #bbb;
+        }
+
+        .filter-group select:focus {
+            outline: none;
+            border-color: #fc4c02;
+            box-shadow: 0 0 0 3px rgba(252, 76, 2, 0.12);
+        }
+
+        /* 按钮 */
+        .btn-back,
+        .btn-primary {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-back {
+            background: #eee;
+            color: #333;
+        }
+
+        .btn-back:hover {
+            background: #ddd;
+        }
+
+        .btn-primary {
+            background: #fc4c02;
+            color: white;
+            box-shadow: 0 2px 6px rgba(252, 76, 2, 0.25);
+        }
+
+        .btn-primary:hover {
+            background: #e04400;
+            box-shadow: 0 4px 10px rgba(252, 76, 2, 0.35);
+        }
+
+        .btn-primary:active {
+            transform: translateY(1px);
+        }
+
+        /* 汇总卡片 */
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .metric-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border-left: 4px solid #fc4c02;
+            transition: transform 0.2s;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .metric-card .label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .metric-card .value {
+            font-size: 22px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        /* 图表卡片 */
+        .chart-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .chart-wrapper {
+            position: relative;
+            height: 380px;
         }
 
         /* 数据表格 */
@@ -194,7 +314,7 @@
             color: #444;
         }
 
-        /* 表格可横向滚动容器与顶部可见横向滚动条 */
+        /* 表格可横向滚动容器 */
         .table-scroll-wrap {
             display: flex;
             flex-direction: column;
@@ -210,13 +330,11 @@
 
         .h-scroll-inner {
             height: 1px;
-            /* 只用来撑宽度显示滚动条 */
         }
 
         .table-scroll {
             overflow: auto;
             max-height: 60vh;
-            /* 限制高度以便在长表格时始终显示横向滚动条 */
         }
 
         .text-right {
@@ -224,13 +342,18 @@
         }
 
         /* 右侧信息栏 */
-        .sidebar-right {
-            width: 280px;
+        .auth-panel {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
+        .auth-card {
             background: white;
-            border-left: 1px solid #e0e0e0;
-            padding: 20px;
-            flex-shrink: 0;
-            overflow-y: auto;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            padding: 16px;
+            width: clamp(260px, 30%, 380px);
         }
 
         .panel-title {
@@ -242,6 +365,10 @@
 
         .token-item {
             margin-bottom: 14px;
+        }
+
+        .token-item:last-child {
+            margin-bottom: 0;
         }
 
         .token-label {
@@ -267,20 +394,6 @@
             text-align: center;
             font-size: 12px;
             flex-shrink: 0;
-        }
-
-        .btn-back {
-            padding: 6px 14px;
-            background: #eee;
-            color: #333;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 13px;
-        }
-
-        .btn-back:hover {
-            background: #ddd;
         }
     </style>
 </head>
@@ -323,7 +436,7 @@
                 </div>
                 <div class="content-body empty" id="result">点击左侧菜单调用接口...</div>
 
-                <!-- 授权信息（已移动到内容区下方，靠右自适应显示） -->
+                <!-- 授权信息 -->
                 <div class="auth-panel">
                     <div class="auth-card">
                         <div class="panel-title">授权信息</div>
@@ -355,6 +468,13 @@
     <script>
         const resultEl = document.getElementById('result');
         const pageTitleEl = document.getElementById('page-title');
+
+        const metricLabels = {
+            count: '运动次数',
+            distance_km: '距离 (km)',
+            moving_time_hours: '移动时长 (h)',
+            elevation_gain_m: '爬升 (m)'
+        };
 
         function setActiveMenu(btn) {
             document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
@@ -452,47 +572,52 @@
             }
         }
 
-        // --- Chart front-end: controls, fetch /chart and render with Chart.js ---
+        // --- 图表分析 ---
         let chartInstance = null;
 
         function buildChartControls() {
             return `
-                <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-                    <label>Year:
+                <div class="filter-bar">
+                    <div class="filter-group">
+                        <label for="chart-year">年份</label>
                         <select id="chart-year">
                             <option value="">全部</option>
                         </select>
-                    </label>
-                    <label>Month:
+                    </div>
+                    <div class="filter-group">
+                        <label for="chart-month">月份</label>
                         <select id="chart-month">
                             <option value="">全部</option>
-                            <option value="1">1</option>
-                            <option value="2">2</option>
-                            <option value="3">3</option>
-                            <option value="4">4</option>
-                            <option value="5">5</option>
-                            <option value="6">6</option>
-                            <option value="7">7</option>
-                            <option value="8">8</option>
-                            <option value="9">9</option>
-                            <option value="10">10</option>
-                            <option value="11">11</option>
-                            <option value="12">12</option>
+                            <option value="1">1 月</option>
+                            <option value="2">2 月</option>
+                            <option value="3">3 月</option>
+                            <option value="4">4 月</option>
+                            <option value="5">5 月</option>
+                            <option value="6">6 月</option>
+                            <option value="7">7 月</option>
+                            <option value="8">8 月</option>
+                            <option value="9">9 月</option>
+                            <option value="10">10 月</option>
+                            <option value="11">11 月</option>
+                            <option value="12">12 月</option>
                         </select>
-                    </label>
-                    <label>Metric:
+                    </div>
+                    <div class="filter-group">
+                        <label for="chart-metric">指标</label>
                         <select id="chart-metric">
-                            <option value="count">次数</option>
+                            <option value="count">运动次数</option>
                             <option value="distance_km" selected>距离 (km)</option>
                             <option value="moving_time_hours">移动时长 (h)</option>
                             <option value="elevation_gain_m">爬升 (m)</option>
                         </select>
-                    </label>
-                    <button class="btn-back" id="chart-run">查询</button>
+                    </div>
+                    <button class="btn-primary" id="chart-run">查询</button>
                 </div>
-                <div id="chart-summary" style="margin-bottom:12px;color:#333;"></div>
-                <div style="background:#fff;padding:12px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
-                    <canvas id="chartCanvas" height="240"></canvas>
+                <div id="chart-summary" class="summary-cards"></div>
+                <div class="chart-card">
+                    <div class="chart-wrapper">
+                        <canvas id="chartCanvas"></canvas>
+                    </div>
                 </div>
             `;
         }
@@ -512,7 +637,7 @@
                     yearsData.years.forEach(y => {
                         const opt = document.createElement('option');
                         opt.value = String(y);
-                        opt.textContent = String(y);
+                        opt.textContent = String(y) + ' 年';
                         sel.appendChild(opt);
                     });
                 }
@@ -547,53 +672,140 @@
 
                 const summaryEl = document.getElementById('chart-summary');
                 if (data.summary) {
-                    summaryEl.textContent = `汇总： 共 ${data.summary.count} 次，距离 ${data.summary.distance_km} km，移动时长 ${data.summary.moving_time_hours} 小时，总爬升 ${data.summary.elevation_gain_m} m`;
+                    summaryEl.innerHTML = `
+                        <div class="metric-card">
+                            <div class="label">运动次数</div>
+                            <div class="value">${data.summary.count}</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="label">总距离</div>
+                            <div class="value">${data.summary.distance_km} km</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="label">移动时长</div>
+                            <div class="value">${data.summary.moving_time_hours} h</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="label">总爬升</div>
+                            <div class="value">${data.summary.elevation_gain_m} m</div>
+                        </div>
+                    `;
                 } else {
-                    summaryEl.textContent = '';
+                    summaryEl.innerHTML = '';
                 }
 
                 const labels = data.labels || [];
-                const values = (data.values || []).map(v => Number(v) || 0);
+                // 后端现在返回每个时间点的全量指标序列，方便 tooltip 一并展示
+                const series = data.series || { [metric]: data.values || [] };
+                const values = (series[metric] || []).map(v => Number(v) || 0);
 
                 if (!labels.length || !values.length) {
                     setError('图表分析', '无可用数据用于绘图');
                     return;
                 }
 
-                renderChart(labels, values, metric || data.metric || 'metric');
+                renderChart(labels, series, metric || data.metric || 'metric');
             } catch (err) {
                 setError('图表分析', '请求出错: ' + err.message);
             }
         }
 
-        function renderChart(labels, values, metric) {
+        function renderChart(labels, series, metric) {
             const ctx = document.getElementById('chartCanvas').getContext('2d');
             if (chartInstance) {
                 chartInstance.destroy();
                 chartInstance = null;
             }
 
-            const isElevation = metric === 'elevation_gain_m';
+            const values = (series[metric] || []).map(v => Number(v) || 0);
+            const isLine = metric === 'elevation_gain_m';
+            const label = metricLabels[metric] || metric;
+
+            // 渐变色背景
+            const gradient = ctx.createLinearGradient(0, 0, 0, 380);
+            gradient.addColorStop(0, 'rgba(252, 76, 2, 0.45)');
+            gradient.addColorStop(1, 'rgba(252, 76, 2, 0.05)');
+
             const cfg = {
-                type: isElevation ? 'line' : 'bar',
+                type: isLine ? 'line' : 'bar',
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: metric,
+                        label: label,
                         data: values,
-                        backgroundColor: isElevation ? 'rgba(255,99,132,0.2)' : 'rgba(54, 162, 235, 0.6)',
-                        borderColor: isElevation ? 'rgba(255,99,132,1)' : 'rgba(54,162,235,1)',
-                        fill: isElevation ? false : true,
-                        tension: isElevation ? 0.3 : 0
+                        backgroundColor: isLine ? gradient : 'rgba(252, 76, 2, 0.75)',
+                        borderColor: '#fc4c02',
+                        borderWidth: 2,
+                        borderRadius: isLine ? 0 : 6,
+                        borderSkipped: false,
+                        fill: isLine,
+                        tension: isLine ? 0.35 : 0,
+                        pointBackgroundColor: '#fff',
+                        pointBorderColor: '#fc4c02',
+                        pointBorderWidth: 2,
+                        pointRadius: isLine ? 4 : 0,
+                        pointHoverRadius: 6
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    scales: {
-                        x: { ticks: { color: '#333' } },
-                        y: { beginAtZero: true, ticks: { color: '#333' } }
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            align: 'end',
+                            labels: {
+                                usePointStyle: true,
+                                pointStyle: 'circle',
+                                boxWidth: 8,
+                                font: { size: 12 }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(40, 40, 40, 0.9)',
+                            titleFont: { size: 13 },
+                            bodyFont: { size: 13 },
+                            padding: 10,
+                            cornerRadius: 8,
+                            callbacks: {
+                                title: function (context) {
+                                    return context[0] ? context[0].label : '';
+                                },
+                                label: function (context) {
+                                    const idx = context.dataIndex;
+                                    const distance = series.distance_km
+                                        ? Number(series.distance_km[idx] || 0).toFixed(2)
+                                        : '-';
+                                    const elevation = series.elevation_gain_m
+                                        ? Number(series.elevation_gain_m[idx] || 0).toFixed(0)
+                                        : '-';
+                                    return [
+                                        `${label}: ${context.parsed.y}`,
+                                        `距离: ${distance} km`,
+                                        `爬升: ${elevation} m`
+                                    ];
+                                }
+                            }
+                        }
                     },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#666', font: { size: 12 } }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' },
+                            ticks: { color: '#666', font: { size: 12 } },
+                            title: {
+                                display: true,
+                                text: label,
+                                color: '#999',
+                                font: { size: 12 }
+                            }
+                        }
+                    }
                 }
             };
 

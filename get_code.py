@@ -1,3 +1,4 @@
+import os
 import webbrowser
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -6,7 +7,8 @@ from stravalib import Client
 # 配置参数
 CLIENT_ID = "117705"
 CLIENT_SECRET = "fb23832768654cfe5ffa53ee6eb80e349b0d6461"
-REDIRECT_URI = "http://127.0.0.1:5000/authorization"
+PORT = int(os.environ.get("PORT", "5001"))
+REDIRECT_URI = f"http://127.0.0.1:{PORT}/authorization"
 SCOPE = "read,activity:read"
 
 # 授权流程中需要保存的结果
@@ -58,7 +60,7 @@ def wait_for_code():
     print(f"授权 URL: {auth_url}")
     print(f"等待浏览器跳转，监听 {REDIRECT_URI} ...\n")
 
-    server = HTTPServer(("127.0.0.1", 5000), OAuthHandler)
+    server = HTTPServer(("127.0.0.1", PORT), OAuthHandler)
     webbrowser.open(auth_url)
 
     server.handle_request()

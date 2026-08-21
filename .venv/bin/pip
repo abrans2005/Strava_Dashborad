@@ -1,4 +1,4 @@
-#!/Users/wangtie/Desktop/kimi_KCFX/.venv/bin/python
+#!/Users/wangtie/kimi_KCFX/.venv/bin/python3.11
 # -*- coding: utf-8 -*-
 import re
 import sys

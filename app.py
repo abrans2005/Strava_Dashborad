@@ -12,7 +12,8 @@ app = Flask(__name__)
 # 默认配置，用户可以在页面上覆盖
 DEFAULT_CLIENT_ID = "117705"
 DEFAULT_CLIENT_SECRET = "fb23832768654cfe5ffa53ee6eb80e349b0d6461"
-REDIRECT_URI = "http://127.0.0.1:5000/authorization"
+PORT = int(os.environ.get("PORT", "5001"))
+REDIRECT_URI = f"http://127.0.0.1:{PORT}/authorization"
 SCOPE = "read,activity:read"
 
 # 活动数据缓存配置
@@ -140,13 +141,21 @@ def to_number(value):
     """把 stravalib 的 Quantity 或普通数值转成 float。"""
     if value is None:
         return None
-    return float(value.num if hasattr(value, "num") else value)
+    if hasattr(value, "magnitude"):
+        return float(value.magnitude)
+    if hasattr(value, "num"):
+        return float(value.num)
+    return float(value)
 
 
 def to_str(value):
     """把 stravalib 的枚举/类型对象转成字符串。"""
     if value is None:
         return None
+    if hasattr(value, "value"):
+        return str(value.value)
+    if hasattr(value, "root"):
+        return str(value.root)
     return str(value)
 
 
@@ -385,7 +394,10 @@ def chart():
 
     请求参数:
     - year: 可选，指定年份（int），则返回该年每月的聚合指标（1-12 月）
-    - metric: 可选，指标名，支持 `count`、`distance_km`、`moving_time_hours`（默认 `distance_km`）
+    - metric: 可选，指标名，支持 `count`、`distance_km`、`moving_time_hours`、`elevation_gain_m`（默认 `distance_km`）
+
+    返回值除了当前选中的指标序列外，还包含每个时间点的全量指标序列，
+    方便前端 tooltip 一并展示距离、爬升等关键信息。
     """
     cache = load_cache()
     activities = cache.get("activities", [])
@@ -395,32 +407,55 @@ def chart():
     if metric not in {"count", "distance_km", "moving_time_hours", "elevation_gain_m"}:
         return jsonify({"error": "unsupported metric"}), 400
 
-    # 过滤函数
+    all_metrics = ["count", "distance_km", "moving_time_hours", "elevation_gain_m"]
+
     def has_date(a):
         return bool(a.get("start_date"))
 
-    # 若指定年份，按每月聚合（保证 12 个月都有值）
+    def per_label_acts():
+        """生成 (label, activities) 列表，并保持时间升序。"""
+        if year:
+            return [
+                (f"{year}-{m:02d}", [
+                    a for a in activities
+                    if has_date(a)
+                    and datetime.fromisoformat(a["start_date"]).year == year
+                    and datetime.fromisoformat(a["start_date"]).month == m
+                ])
+                for m in range(1, 13)
+            ]
+
+        groups = {}
+        for a in activities:
+            if not has_date(a):
+                continue
+            key = datetime.fromisoformat(a["start_date"]).strftime("%Y-%m")
+            groups.setdefault(key, []).append(a)
+        return sorted(groups.items(), key=lambda x: x[0])
+
+    label_acts = per_label_acts()
+    labels = [label for label, _ in label_acts]
+
+    series = {m: [] for m in all_metrics}
+    for _, acts in label_acts:
+        agg = aggregate_activities(acts)
+        for m in all_metrics:
+            series[m].append(agg.get(m, 0))
+
     if year:
-        labels = [f"{year}-{m:02d}" for m in range(1, 13)]
-        values = []
-        for m in range(1, 13):
-            month_acts = [a for a in activities if has_date(a) and datetime.fromisoformat(a["start_date"]).year == year and datetime.fromisoformat(a["start_date"]).month == m]
-            agg = aggregate_activities(month_acts)
-            values.append(agg.get(metric, 0))
+        summary = aggregate_activities([
+            a for a in activities
+            if has_date(a) and datetime.fromisoformat(a["start_date"]).year == year
+        ])
+    else:
+        summary = aggregate_activities([a for a in activities if has_date(a)])
 
-        summary = aggregate_activities([a for a in activities if has_date(a) and datetime.fromisoformat(a["start_date"]).year == year])
-        return jsonify({"labels": labels, "values": values, "metric": metric, "summary": summary})
-
-    # 未指定年份：使用按月分组（跨年），按年月作为标签
-    by_month = group_activities_by(activities, lambda a: datetime.fromisoformat(a["start_date"]).strftime("%Y-%m"))
-    # group_activities_by 返回按 key 倒序，这里按升序排序以便时间轴从早到晚
-    by_month_sorted = sorted(by_month, key=lambda x: x["key"]) if by_month else []
-
-    labels = [x["key"] for x in by_month_sorted]
-    values = [x.get(metric, 0) for x in by_month_sorted]
-
-    summary = aggregate_activities([a for a in activities if has_date(a)])
-    return jsonify({"labels": labels, "values": values, "metric": metric, "summary": summary})
+    return jsonify({
+        "labels": labels,
+        "metric": metric,
+        "series": series,
+        "summary": summary,
+    })
 
 
 @app.route('/chart/years')
@@ -459,4 +494,4 @@ if __name__ == "__main__":
     sync_thread = threading.Thread(target=auto_sync_loop, daemon=True)
     sync_thread.start()
 
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=PORT, debug=True)
