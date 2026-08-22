@@ -1,6 +1,6 @@
 {
   "token_fp": "43292bbc",
-  "cached_at": 1787385201.366038,
+  "cached_at": 1787385779.828706,
   "athlete": {
     "_fetch_errors": [
       "athlete_type: could not convert string to float: 'cyclist'"
@@ -291,5 +291,5 @@
       ]
     }
   ],
-  "zones_cached_at": 1787385201.6295092
+  "zones_cached_at": 1787385780.179002
 }

@@ -955,9 +955,6 @@
                 { label: 'FTP', value: athlete.ftp !== null && athlete.ftp !== undefined ? athlete.ftp + ' W' : '-' },
                 { label: '关注者', value: athlete.follower_count !== null && athlete.follower_count !== undefined ? athlete.follower_count : '-' },
                 { label: '好友', value: athlete.friend_count !== null && athlete.friend_count !== undefined ? athlete.friend_count : '-' },
-                { label: '共同好友', value: athlete.mutual_friend_count !== null && athlete.mutual_friend_count !== undefined ? athlete.mutual_friend_count : '-' },
-                { label: '运动员类型', value: athlete.athlete_type !== null && athlete.athlete_type !== undefined ? athlete.athlete_type : '-' },
-                { label: '计量单位', value: athlete.measurement_preference || '-' },
                 { label: '加入时间', value: joined },
             ];
 
@@ -970,7 +967,6 @@
 
             const bikes = Array.isArray(athlete.bikes) ? athlete.bikes : [];
             const shoes = Array.isArray(athlete.shoes) ? athlete.shoes : [];
-            const clubs = Array.isArray(athlete.clubs) ? athlete.clubs : [];
 
             const bikesHtml = bikes.length ? bikes.map(b => `
                 <div class="athlete-list-item">
@@ -992,17 +988,7 @@
                 </div>
             `).join('') : '<div class="zone-empty" style="padding:12px 0;">暂无跑鞋数据</div>';
 
-            const clubsHtml = clubs.length ? clubs.map(c => `
-                <div class="athlete-list-item">
-                    <div>
-                        <div class="name">${escapeHtml(c.name || '-')}</div>
-                        ${c.member_count !== null && c.member_count !== undefined ? `<div class="meta">${c.member_count} 名成员</div>` : ''}
-                    </div>
-                    <div class="meta">${escapeHtml(c.sport_type || '')}</div>
-                </div>
-            `).join('') : '';
-
-            const gearAndClubsHtml = `
+            const gearHtml = `
                 <div class="athlete-subsection">
                     <div class="athlete-grid-2">
                         <div class="athlete-card">
@@ -1013,12 +999,6 @@
                             <div class="athlete-subsection-title">跑鞋</div>
                             <div class="athlete-list">${shoesHtml}</div>
                         </div>
-                        ${clubsHtml ? `
-                        <div class="athlete-card">
-                            <div class="athlete-subsection-title">俱乐部</div>
-                            <div class="athlete-list">${clubsHtml}</div>
-                        </div>
-                        ` : ''}
                     </div>
                 </div>
             `;
@@ -1035,7 +1015,7 @@
                         </div>
                     </div>
                     <div class="athlete-stats">${statsHtml}</div>
-                    ${gearAndClubsHtml}
+                    ${gearHtml}
                     <div class="zones-panel">${buildZonesPanel(zonesData)}</div>
                 </div>
             `;
