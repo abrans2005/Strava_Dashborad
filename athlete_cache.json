@@ -1,0 +1,295 @@
+{
+  "token_fp": "43292bbc",
+  "cached_at": 1787384743.588125,
+  "athlete": {
+    "_fetch_errors": [
+      "athlete_type: could not convert string to float: 'cyclist'"
+    ],
+    "id": 7058961,
+    "username": null,
+    "resource_state": 3.0,
+    "firstname": "Serac",
+    "lastname": "+VLCC",
+    "city": "Beijing",
+    "state": "",
+    "country": "China",
+    "sex": "M",
+    "premium": true,
+    "created_at": "2014-11-12T03:14:36+00:00",
+    "updated_at": "2026-08-22T04:01:52+00:00",
+    "badge_type_id": 1.0,
+    "profile_medium": "https://dgalywyr863hv.cloudfront.net/pictures/athletes/7058961/4329632/3/medium.jpg",
+    "profile": "https://dgalywyr863hv.cloudfront.net/pictures/athletes/7058961/4329632/3/large.jpg",
+    "friend": null,
+    "follower": null,
+    "follower_count": 134.0,
+    "friend_count": 106.0,
+    "mutual_friend_count": 0.0,
+    "athlete_type": null,
+    "date_preference": "%m/%d/%Y",
+    "measurement_preference": "meters",
+    "clubs": [
+      {
+        "id": 157818,
+        "name": "北京闪电俱乐部",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "beijingspecialized"
+      },
+      {
+        "id": 279066,
+        "name": "驭•西山",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "xishan"
+      },
+      {
+        "id": 94459,
+        "name": "S-Works",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": ""
+      },
+      {
+        "id": 281278,
+        "name": "北京狂魔车队",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "ManiacCycling"
+      },
+      {
+        "id": 520838,
+        "name": "RE Cycling Club",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "REcyclingclub"
+      },
+      {
+        "id": 5965,
+        "name": "北京早 ❤️ Beijing Sunrise",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "beijingsunrise"
+      },
+      {
+        "id": 101999,
+        "name": "SERK Cycling Club",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "serk"
+      },
+      {
+        "id": 231407,
+        "name": "The Strava Club",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "other",
+        "url": "strava"
+      },
+      {
+        "id": 559486,
+        "name": "V Lines Rider",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "vlines"
+      },
+      {
+        "id": 695643,
+        "name": "小米骑行俱乐部",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "XiaomiChina"
+      },
+      {
+        "id": 523898,
+        "name": "骑货(北京)单车俱乐部",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": ""
+      },
+      {
+        "id": 104733,
+        "name": "Zwift",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "gozwift"
+      },
+      {
+        "id": 701888,
+        "name": "熊猫骑行俱乐部 - Panda Cycling Club",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "PandaCyclingClub"
+      },
+      {
+        "id": 1049160,
+        "name": "VLCC 黑练小队（叶教练’s yoga cycling club）",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "vlinesrider"
+      },
+      {
+        "id": 1029858,
+        "name": "骑意",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "KiwiStudio"
+      },
+      {
+        "id": 293623,
+        "name": "MAAP",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": "maap"
+      },
+      {
+        "id": 1434058,
+        "name": "HTCC",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "cycling",
+        "url": ""
+      },
+      {
+        "id": 1246370,
+        "name": "100000M计划",
+        "resource_state": 2.0,
+        "member_count": 0.0,
+        "sport_type": "other",
+        "url": ""
+      }
+    ],
+    "ftp": 243.0,
+    "weight": 64.0,
+    "bikes": [
+      {
+        "id": "b5968949",
+        "primary": false,
+        "name": "SCOTT ADDICT 10 2017",
+        "resource_state": 2.0,
+        "distance": 23152170.0
+      }
+    ],
+    "shoes": [
+      {
+        "id": "g6487467",
+        "primary": false,
+        "name": "Nike VaporMax 踩屎鞋",
+        "resource_state": 2.0,
+        "distance": 308537.0
+      }
+    ]
+  },
+  "zones": [
+    {
+      "heart_rate": {
+        "custom_zones": true,
+        "zones": [
+          {
+            "min": 0,
+            "max": 116
+          },
+          {
+            "min": 116,
+            "max": 146
+          },
+          {
+            "min": 146,
+            "max": 160
+          },
+          {
+            "min": 160,
+            "max": 175
+          },
+          {
+            "min": 175,
+            "max": -1
+          }
+        ]
+      },
+      "power": {
+        "zones": [
+          {
+            "min": 0,
+            "max": 134
+          },
+          {
+            "min": 135,
+            "max": 182
+          },
+          {
+            "min": 183,
+            "max": 219
+          },
+          {
+            "min": 220,
+            "max": 255
+          },
+          {
+            "min": 256,
+            "max": 292
+          },
+          {
+            "min": 293,
+            "max": 365
+          },
+          {
+            "min": 366,
+            "max": -1
+          }
+        ]
+      }
+    },
+    {
+      "type": "heart_rate",
+      "source": "estimated",
+      "estimated_max_hr": 190,
+      "custom_zones": false,
+      "resource_state": 3,
+      "sensor_based": false,
+      "distribution_buckets": [
+        {
+          "min": 0,
+          "max": 114,
+          "time": null
+        },
+        {
+          "min": 114,
+          "max": 133,
+          "time": null
+        },
+        {
+          "min": 133,
+          "max": 152,
+          "time": null
+        },
+        {
+          "min": 152,
+          "max": 171,
+          "time": null
+        },
+        {
+          "min": 171,
+          "max": 190,
+          "time": null
+        }
+      ]
+    }
+  ],
+  "zones_cached_at": 1787384743.5280561
+}

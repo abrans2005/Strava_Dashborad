@@ -9,7 +9,7 @@ CLIENT_ID = "117705"
 CLIENT_SECRET = "fb23832768654cfe5ffa53ee6eb80e349b0d6461"
 PORT = int(os.environ.get("PORT", "5001"))
 REDIRECT_URI = f"http://127.0.0.1:{PORT}/authorization"
-SCOPE = "read,activity:read"
+SCOPE = "read,activity:read,profile:read_all"
 
 # 授权流程中需要保存的结果
 code = None

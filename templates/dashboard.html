@@ -296,6 +296,271 @@
             margin-bottom: 12px;
         }
 
+        /* 运动员信息面板 */
+        .athlete-section {
+            margin-bottom: 24px;
+        }
+
+        .athlete-header {
+            background: #fff;
+            border-radius: 14px;
+            padding: 28px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+            display: flex;
+            gap: 24px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .athlete-avatar {
+            width: 96px;
+            height: 96px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 4px solid #fc4c02;
+            flex-shrink: 0;
+            background: #f0f0f0;
+        }
+
+        .athlete-title {
+            flex: 1;
+            min-width: 240px;
+        }
+
+        .athlete-name {
+            font-size: 26px;
+            font-weight: 800;
+            color: #222;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .athlete-username {
+            font-size: 14px;
+            color: #888;
+            font-weight: 500;
+        }
+
+        .athlete-location {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .athlete-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .athlete-badge.premium {
+            background: #fff3e5;
+            color: #fc4c02;
+        }
+
+        .athlete-badge.free {
+            background: #f0f0f0;
+            color: #888;
+        }
+
+        .athlete-joined {
+            font-size: 13px;
+            color: #888;
+        }
+
+        .athlete-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 14px;
+            margin-top: 18px;
+        }
+
+        .athlete-stat {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            text-align: center;
+            transition: transform 0.2s;
+        }
+
+        .athlete-stat:hover {
+            transform: translateY(-2px);
+        }
+
+        .athlete-stat .label {
+            font-size: 11px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .athlete-stat .value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .athlete-subsection {
+            margin-top: 18px;
+        }
+
+        .athlete-subsection-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+        }
+
+        .athlete-grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+        }
+
+        .athlete-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .athlete-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .athlete-list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: #fafafa;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .athlete-list-item .name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .athlete-list-item .meta {
+            color: #888;
+            font-size: 12px;
+        }
+
+        /* 心率 / 功率区间展示 */
+        .zones-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 16px;
+            margin-top: 18px;
+        }
+
+        .zone-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .zone-card h3 {
+            margin: 0 0 14px 0;
+            font-size: 15px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .zone-type-tag {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: #f0f0f0;
+            color: #888;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .zone-bar {
+            display: flex;
+            height: 42px;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 14px;
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+        }
+
+        .zone-segment {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 12px;
+            font-weight: 600;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+            min-width: 24px;
+            transition: opacity 0.2s;
+            position: relative;
+        }
+
+        .zone-segment:hover {
+            opacity: 0.85;
+        }
+
+        .zone-segment .segment-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding: 0 4px;
+        }
+
+        .zone-legend {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 8px;
+        }
+
+        .zone-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #555;
+        }
+
+        .zone-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .zone-time {
+            color: #888;
+            margin-left: auto;
+            font-size: 11px;
+        }
+
+        .zone-empty {
+            color: #999;
+            font-size: 14px;
+            text-align: center;
+            padding: 24px 0;
+        }
+
         /* 数据表格 */
         .data-table {
             width: 100%;
@@ -421,14 +686,14 @@
             <aside class="sidebar-left">
                 <div class="menu-title">功能菜单</div>
                 <div class="menu-list">
-                    <button class="menu-item active" onclick="loadAthlete(this)">
+                    <button class="menu-item" onclick="loadAthleteProfileOnly(this)">
                         运动员信息
+                    </button>
+                    <button class="menu-item active" onclick="loadChart(this)">
+                        图表分析
                     </button>
                     <button class="menu-item" onclick="loadActivities(this)">
                         活动列表
-                    </button>
-                    <button class="menu-item" onclick="loadChart(this)">
-                        图表分析
                     </button>
                     <button class="menu-item" disabled>
                         好友列表 <span class="menu-badge">预留</span>
@@ -445,12 +710,12 @@
             <!-- 中间内容区 -->
             <main class="main">
                 <div class="content-header">
-                    <h2 id="page-title">运动员信息</h2>
+                    <h2 id="page-title">图表分析</h2>
                     <div style="display:flex;gap:8px;align-items:center;">
                         <button class="btn-back" onclick="location.href='/'">返回登录页</button>
                     </div>
                 </div>
-                <div class="content-body empty" id="result">点击左侧菜单调用接口...</div>
+                <div class="content-body empty" id="result">点击左侧「图表分析」加载数据...</div>
 
                 <!-- 授权信息 -->
                 <div class="auth-panel">
@@ -541,6 +806,14 @@
             return `${m}m ${s}s`;
         }
 
+        function formatTimeSeconds(seconds) {
+            if (seconds === null || seconds === undefined || seconds === '') return '-';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            if (h > 0) return `${h}h ${m}m`;
+            return `${m}m`;
+        }
+
         function formatElevation(meters) {
             if (meters === null || meters === undefined) return '-';
             return meters.toFixed(0) + ' m';
@@ -571,30 +844,216 @@
             return value.toFixed(0) + ' W';
         }
 
-        async function loadAthlete(btn) {
-            setActiveMenu(btn);
-            setLoading('运动员信息');
+        const zoneColors = ['#3b82f6', '#22c55e', '#eab308', '#f97316', '#ef4444'];
 
-            try {
-                const res = await fetch('/athlete');
-                const data = await res.json();
-                if (res.ok) {
-                    setHtml('运动员信息', '<pre>' + escapeHtml(JSON.stringify(data, null, 2)) + '</pre>');
-                } else {
-                    setError('运动员信息', '获取失败: ' + (data.error || '未知错误'));
+        function formatCreatedAt(iso) {
+            if (!iso) return '-';
+            return new Date(iso).toLocaleDateString('zh-CN');
+        }
+
+        function formatSex(sex) {
+            if (sex === 'M') return '男';
+            if (sex === 'F') return '女';
+            return sex || '-';
+        }
+
+        function buildZonesPanel(zonesData) {
+            // zonesData 应为数组；兼容旧对象格式
+            let zones = [];
+            if (Array.isArray(zonesData)) {
+                zones = zonesData;
+            } else if (zonesData && typeof zonesData === 'object') {
+                if (zonesData.error) {
+                    return `<div class="zone-card"><div class="zone-empty" style="color:#c00;">获取失败：${escapeHtml(zonesData.error)}<br><small style="color:#888;">请尝试重新授权，并确认 Strava 应用已开启 <b>profile:read_all</b> 权限。</small></div></div>`;
                 }
-            } catch (err) {
-                setError('运动员信息', '请求出错: ' + err.message);
+                zones = [];
             }
+
+            zones = zones.filter(z => z && Array.isArray(z.distribution_buckets) && z.distribution_buckets.length > 0);
+            if (zones.length === 0) {
+                return `<div class="zone-card"><h3>心率 / 功率区间</h3><div class="zone-empty">暂无区间数据</div></div>`;
+            }
+
+            return zones.map(zone => {
+                const type = zone.type || 'heart_rate';
+                const title = type === 'power' ? '功率区间' : '心率区间';
+                const unit = type === 'power' ? 'W' : 'bpm';
+                const tag = type === 'power' ? 'Power' : 'Heart Rate';
+
+                const buckets = zone.distribution_buckets
+                    .map((b, i) => ({ ...b, index: i }))
+                    .filter(b => b.max !== null || b.min !== null);
+
+                if (buckets.length === 0) {
+                    return `<div class="zone-card"><h3>${title} <span class="zone-type-tag">${tag}</span></h3><div class="zone-empty">暂无有效区间</div></div>`;
+                }
+
+                // 最后一个 bucket 的 max 可能为 null / -1，表示无上限
+                const definedMaxes = buckets.map(b => b.max).filter(v => v !== null && v !== undefined && v !== -1);
+                const globalMax = definedMaxes.length ? Math.max(...definedMaxes) : Math.max(...buckets.map(b => (b.min || 0)));
+                const tail = Math.max(type === 'power' ? 50 : 10, Math.round(globalMax * 0.08));
+
+                const displayBuckets = buckets.map(b => {
+                    const min = b.min !== null && b.min !== undefined ? b.min : 0;
+                    const hasMax = b.max !== null && b.max !== undefined && b.max !== -1;
+                    const max = hasMax ? b.max : (globalMax + tail);
+                    return { ...b, min, max, hasMax };
+                });
+
+                const minBase = Math.min(...displayBuckets.map(b => b.min));
+                const totalRange = Math.max(...displayBuckets.map(b => b.max)) - minBase;
+                const effectiveTotal = totalRange > 0 ? totalRange : 1;
+
+                const segments = displayBuckets.map((b, i) => {
+                    const width = ((b.max - b.min) / effectiveTotal) * 100;
+                    const color = zoneColors[i % zoneColors.length];
+                    const rangeText = b.hasMax ? `${b.min}-${b.max}` : `${b.min}+`;
+                    const label = width > 10 ? rangeText : '';
+                    const timeText = b.time ? ' · 时间 ' + formatTimeSeconds(b.time) : '';
+                    return `<div class="zone-segment" style="flex:${Math.max(width, 1)};background:${color};" title="Z${i + 1}: ${rangeText} ${unit}${timeText}"><span class="segment-label">${label}</span></div>`;
+                }).join('');
+
+                const legend = displayBuckets.map((b, i) => {
+                    const color = zoneColors[i % zoneColors.length];
+                    const rangeText = b.hasMax ? `${b.min}-${b.max}` : `${b.min}+`;
+                    const timeText = b.time ? formatTimeSeconds(b.time) : '-';
+                    return `
+                        <div class="zone-legend-item">
+                            <div class="zone-dot" style="background:${color}"></div>
+                            <span>Z${i + 1}: ${rangeText} ${unit}</span>
+                            <span class="zone-time">${timeText}</span>
+                        </div>
+                    `;
+                }).join('');
+
+                const note = zone.source === 'estimated'
+                    ? `<span style="font-size:12px;color:#3182ce;font-weight:600;margin-left:8px;">根据历史活动估算（最大心率约 ${escapeHtml(zone.estimated_max_hr)} bpm）</span>`
+                    : (zone.custom_zones
+                        ? '<span style="font-size:12px;color:#fc4c02;font-weight:600;margin-left:8px;">自定义区间</span>'
+                        : '<span style="font-size:12px;color:#888;font-weight:600;margin-left:8px;">Strava 默认区间</span>');
+
+                return `
+                    <div class="zone-card">
+                        <h3>${title} <span class="zone-type-tag">${tag}</span>${note}</h3>
+                        <div class="zone-bar">${segments}</div>
+                        <div class="zone-legend">${legend}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function buildAthleteProfile(athlete, zonesData) {
+            const fullName = escapeHtml(((athlete.firstname || '') + ' ' + (athlete.lastname || '')).trim()) || '运动员';
+            const avatarUrl = athlete.profile_medium || athlete.profile || '';
+            const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName)}&background=fc4c02&color=fff&size=200`;
+            const username = athlete.username ? `@${athlete.username}` : '';
+            const location = [athlete.city, athlete.state, athlete.country].filter(Boolean).join(', ') || '-';
+            const joined = athlete.created_at ? formatCreatedAt(athlete.created_at) : '-';
+            const premiumBadge = athlete.premium
+                ? '<span class="athlete-badge premium">Premium</span>'
+                : '<span class="athlete-badge free">Free</span>';
+
+            const stats = [
+                { label: '体重', value: athlete.weight !== null && athlete.weight !== undefined ? athlete.weight.toFixed(1) + ' kg' : '-' },
+                { label: 'FTP', value: athlete.ftp !== null && athlete.ftp !== undefined ? athlete.ftp + ' W' : '-' },
+                { label: '关注者', value: athlete.follower_count !== null && athlete.follower_count !== undefined ? athlete.follower_count : '-' },
+                { label: '好友', value: athlete.friend_count !== null && athlete.friend_count !== undefined ? athlete.friend_count : '-' },
+                { label: '共同好友', value: athlete.mutual_friend_count !== null && athlete.mutual_friend_count !== undefined ? athlete.mutual_friend_count : '-' },
+                { label: '运动员类型', value: athlete.athlete_type !== null && athlete.athlete_type !== undefined ? athlete.athlete_type : '-' },
+                { label: '计量单位', value: athlete.measurement_preference || '-' },
+                { label: '加入时间', value: joined },
+            ];
+
+            const statsHtml = stats.map(s => `
+                <div class="athlete-stat">
+                    <div class="label">${s.label}</div>
+                    <div class="value">${s.value}</div>
+                </div>
+            `).join('');
+
+            const bikes = Array.isArray(athlete.bikes) ? athlete.bikes : [];
+            const shoes = Array.isArray(athlete.shoes) ? athlete.shoes : [];
+            const clubs = Array.isArray(athlete.clubs) ? athlete.clubs : [];
+
+            const bikesHtml = bikes.length ? bikes.map(b => `
+                <div class="athlete-list-item">
+                    <div>
+                        <div class="name">${escapeHtml(b.name || '-')}</div>
+                        ${b.primary ? '<div class="meta">主用车</div>' : ''}
+                    </div>
+                    <div class="meta">${b.distance !== null && b.distance !== undefined ? formatDistance(b.distance) : '-'}</div>
+                </div>
+            `).join('') : '<div class="zone-empty" style="padding:12px 0;">暂无自行车数据</div>';
+
+            const shoesHtml = shoes.length ? shoes.map(s => `
+                <div class="athlete-list-item">
+                    <div>
+                        <div class="name">${escapeHtml(s.name || '-')}</div>
+                        ${s.primary ? '<div class="meta">主用鞋</div>' : ''}
+                    </div>
+                    <div class="meta">${s.distance !== null && s.distance !== undefined ? formatDistance(s.distance) : '-'}</div>
+                </div>
+            `).join('') : '<div class="zone-empty" style="padding:12px 0;">暂无跑鞋数据</div>';
+
+            const clubsHtml = clubs.length ? clubs.map(c => `
+                <div class="athlete-list-item">
+                    <div>
+                        <div class="name">${escapeHtml(c.name || '-')}</div>
+                        ${c.member_count !== null && c.member_count !== undefined ? `<div class="meta">${c.member_count} 名成员</div>` : ''}
+                    </div>
+                    <div class="meta">${escapeHtml(c.sport_type || '')}</div>
+                </div>
+            `).join('') : '';
+
+            const gearAndClubsHtml = `
+                <div class="athlete-subsection">
+                    <div class="athlete-grid-2">
+                        <div class="athlete-card">
+                            <div class="athlete-subsection-title">自行车</div>
+                            <div class="athlete-list">${bikesHtml}</div>
+                        </div>
+                        <div class="athlete-card">
+                            <div class="athlete-subsection-title">跑鞋</div>
+                            <div class="athlete-list">${shoesHtml}</div>
+                        </div>
+                        ${clubsHtml ? `
+                        <div class="athlete-card">
+                            <div class="athlete-subsection-title">俱乐部</div>
+                            <div class="athlete-list">${clubsHtml}</div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+
+            return `
+                <div class="athlete-section">
+                    <div class="athlete-header">
+                        <img src="${escapeHtml(avatarUrl)}" alt="avatar" class="athlete-avatar" onerror="this.src='${fallbackAvatar}'">
+                        <div class="athlete-title">
+                            <div class="athlete-name">${fullName} ${premiumBadge}</div>
+                            ${username ? `<div class="athlete-username">${escapeHtml(username)}</div>` : ''}
+                            <div class="athlete-location">📍 ${escapeHtml(location)}</div>
+                            <div class="athlete-joined">加入时间：${joined}</div>
+                        </div>
+                    </div>
+                    <div class="athlete-stats">${statsHtml}</div>
+                    ${gearAndClubsHtml}
+                    <div class="zones-panel">${buildZonesPanel(zonesData)}</div>
+                </div>
+            `;
         }
 
         // --- 图表分析 ---
         let chartInstance = null;
         let powerChartInstance = null;
         let hrChartInstance = null;
+        let topElevationChartInstance = null;
+        let topDistanceChartInstance = null;
 
         function buildChartControls() {
             return `
+                <div id="athlete-profile-section"></div>
                 <div class="filter-bar">
                     <div class="filter-group">
                         <label for="chart-year">年份</label>
@@ -651,7 +1110,81 @@
                         </div>
                     </div>
                 </div>
+                <div class="chart-row" style="margin-top:20px;">
+                    <div class="chart-card">
+                        <div class="chart-title">骑行爬升 TOP20</div>
+                        <div class="chart-wrapper" style="height:520px;">
+                            <canvas id="topElevationCanvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title">骑行里程 TOP20</div>
+                        <div class="chart-wrapper" style="height:520px;">
+                            <canvas id="topDistanceCanvas"></canvas>
+                        </div>
+                    </div>
+                </div>
             `;
+        }
+
+        async function renderAthleteProfileSection() {
+            const section = document.getElementById('athlete-profile-section');
+            if (!section) return;
+
+            try {
+                const [athleteRes, zonesRes] = await Promise.all([
+                    fetch('/athlete'),
+                    fetch('/athlete/zones')
+                ]);
+
+                const athlete = athleteRes.ok ? await athleteRes.json() : null;
+                const zonesData = zonesRes.ok
+                    ? await zonesRes.json()
+                    : { error: '获取心率区间失败' };
+
+                if (athlete && athlete.error) {
+                    section.innerHTML = `<div style="color:#c00;padding:12px 0;">运动员信息加载失败：${escapeHtml(athlete.error)}</div>`;
+                    return;
+                }
+
+                if (athlete) {
+                    section.innerHTML = buildAthleteProfile(athlete, zonesData);
+                }
+            } catch (e) {
+                section.innerHTML = `<div style="color:#c00;padding:12px 0;">运动员信息加载失败：${escapeHtml(e.message)}</div>`;
+                console.error('加载运动员信息失败:', e);
+            }
+        }
+
+        async function loadAthleteProfileOnly(btn) {
+            setActiveMenu(btn);
+            setLoading('运动员信息');
+
+            try {
+                const [athleteRes, zonesRes] = await Promise.all([
+                    fetch('/athlete'),
+                    fetch('/athlete/zones')
+                ]);
+
+                const athlete = athleteRes.ok ? await athleteRes.json() : null;
+                const zonesData = zonesRes.ok
+                    ? await zonesRes.json()
+                    : { error: '获取心率区间失败' };
+
+                if (athlete && athlete.error) {
+                    setError('运动员信息', '获取失败: ' + athlete.error);
+                    return;
+                }
+
+                if (!athlete) {
+                    setError('运动员信息', '未能获取运动员信息');
+                    return;
+                }
+
+                setHtml('运动员信息', buildAthleteProfile(athlete, zonesData));
+            } catch (err) {
+                setError('运动员信息', '请求出错: ' + err.message);
+            }
         }
 
         async function loadChart(btn) {
@@ -659,6 +1192,9 @@
             setLoading('图表分析');
 
             setHtml('图表分析', buildChartControls());
+
+            // 同时加载运动员信息（已做后端缓存，不会频繁调用 Strava API）
+            await renderAthleteProfileSection();
 
             // 动态填充 Year 选项
             try {
@@ -700,17 +1236,23 @@
                 const mainUrl = '/chart' + (metricQs.length ? ('?' + metricQs.join('&')) : '');
                 const powerUrl = '/chart/power-distribution' + (baseQs.length ? ('?' + baseQs.join('&')) : '');
                 const hrUrl = '/chart/hr-zones' + (baseQs.length ? ('?' + baseQs.join('&')) : '');
+                const topElevationUrl = '/chart/top-elevation';
+                const topDistanceUrl = '/chart/top-distance';
 
-                const [mainRes, powerRes, hrRes] = await Promise.all([
+                const [mainRes, powerRes, hrRes, topElevationRes, topDistanceRes] = await Promise.all([
                     fetch(mainUrl),
                     fetch(powerUrl),
-                    fetch(hrUrl)
+                    fetch(hrUrl),
+                    fetch(topElevationUrl),
+                    fetch(topDistanceUrl)
                 ]);
 
-                const [data, powerData, hrData] = await Promise.all([
+                const [data, powerData, hrData, topElevationData, topDistanceData] = await Promise.all([
                     mainRes.json(),
                     powerRes.json(),
-                    hrRes.json()
+                    hrRes.json(),
+                    topElevationRes.json(),
+                    topDistanceRes.json()
                 ]);
 
                 if (!mainRes.ok) {
@@ -759,6 +1301,12 @@
                 }
                 if (hrRes.ok) {
                     renderHRZones(hrData);
+                }
+                if (topElevationRes.ok) {
+                    renderTopElevation(topElevationData);
+                }
+                if (topDistanceRes.ok) {
+                    renderTopDistance(topDistanceData);
                 }
             } catch (err) {
                 setError('图表分析', '请求出错: ' + err.message);
@@ -1043,6 +1591,165 @@
             });
         }
 
+        function _truncateName(name, maxLen = 22) {
+            if (!name) return '-';
+            if (name.length <= maxLen) return name;
+            return name.slice(0, maxLen) + '…';
+        }
+
+        function _buildTopActivityTooltip(activity) {
+            return [
+                `距离: ${formatDistance(activity.distance)}`,
+                `爬升: ${formatElevation(activity.total_elevation_gain)}`,
+                `移动时间: ${formatTime(activity.moving_time)}`,
+                `平均速度: ${formatSpeed(activity.average_speed)}`,
+                `平均心率: ${formatHeartRate(activity.average_heartrate)}`,
+                `最大功率: ${formatWatts(activity.average_watts)}`,
+                `开始时间: ${formatDate(activity.start_date)}`
+            ];
+        }
+
+        function renderTopElevation(data) {
+            const ctx = document.getElementById('topElevationCanvas').getContext('2d');
+            if (topElevationChartInstance) {
+                topElevationChartInstance.destroy();
+                topElevationChartInstance = null;
+            }
+
+            const items = Array.isArray(data) ? data : [];
+            if (items.length === 0) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                return;
+            }
+
+            // 横柱状图：最高的在最上面，所以数组反转为升序，配合 y reverse
+            const chartData = [...items].reverse();
+            const labels = chartData.map(a => _truncateName(a.name));
+            const values = chartData.map(a => a.total_elevation_gain || 0);
+
+            const gradient = ctx.createLinearGradient(0, 0, ctx.canvas.width, 0);
+            gradient.addColorStop(0, 'rgba(34, 197, 94, 0.55)');
+            gradient.addColorStop(1, 'rgba(34, 197, 94, 0.9)');
+
+            topElevationChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '爬升 (m)',
+                        data: values,
+                        backgroundColor: gradient,
+                        borderColor: '#16a34a',
+                        borderWidth: 1,
+                        borderRadius: 5,
+                        borderSkipped: false
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(40, 40, 40, 0.9)',
+                            titleFont: { size: 13 },
+                            bodyFont: { size: 13 },
+                            padding: 10,
+                            cornerRadius: 8,
+                            callbacks: {
+                                title: (ctx) => ctx[0] ? items[items.length - 1 - ctx[0].dataIndex].name : '',
+                                label: (ctx) => _buildTopActivityTooltip(items[items.length - 1 - ctx.dataIndex])
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(0,0,0,0.05)' },
+                            ticks: { color: '#666', font: { size: 11 } },
+                            title: { display: true, text: '爬升 (m)', color: '#999', font: { size: 12 } }
+                        },
+                        y: {
+                            grid: { display: false },
+                            ticks: { color: '#555', font: { size: 12 } },
+                            reverse: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderTopDistance(data) {
+            const ctx = document.getElementById('topDistanceCanvas').getContext('2d');
+            if (topDistanceChartInstance) {
+                topDistanceChartInstance.destroy();
+                topDistanceChartInstance = null;
+            }
+
+            const items = Array.isArray(data) ? data : [];
+            if (items.length === 0) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                return;
+            }
+
+            const chartData = [...items].reverse();
+            const labels = chartData.map(a => _truncateName(a.name));
+            const values = chartData.map(a => (a.distance || 0) / 1000);
+
+            const gradient = ctx.createLinearGradient(0, 0, ctx.canvas.width, 0);
+            gradient.addColorStop(0, 'rgba(252, 76, 2, 0.55)');
+            gradient.addColorStop(1, 'rgba(252, 76, 2, 0.9)');
+
+            topDistanceChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '距离 (km)',
+                        data: values,
+                        backgroundColor: gradient,
+                        borderColor: '#e04400',
+                        borderWidth: 1,
+                        borderRadius: 5,
+                        borderSkipped: false
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(40, 40, 40, 0.9)',
+                            titleFont: { size: 13 },
+                            bodyFont: { size: 13 },
+                            padding: 10,
+                            cornerRadius: 8,
+                            callbacks: {
+                                title: (ctx) => ctx[0] ? items[items.length - 1 - ctx[0].dataIndex].name : '',
+                                label: (ctx) => _buildTopActivityTooltip(items[items.length - 1 - ctx.dataIndex])
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(0,0,0,0.05)' },
+                            ticks: { color: '#666', font: { size: 11 } },
+                            title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } }
+                        },
+                        y: {
+                            grid: { display: false },
+                            ticks: { color: '#555', font: { size: 12 } },
+                            reverse: true
+                        }
+                    }
+                }
+            });
+        }
+
         // Wrap a table HTML with scroll containers: a top horizontal scrollbar and the actual scroll area
         function buildScrollableTable(html) {
             return `
@@ -1166,6 +1873,12 @@
                 setError('活动列表', '请求出错: ' + err.message);
             }
         }
+
+        // 页面加载后默认打开图表分析（已包含运动员信息）
+        document.addEventListener('DOMContentLoaded', () => {
+            const chartBtn = document.querySelector('.menu-item[onclick*="loadChart"]');
+            if (chartBtn) loadChart(chartBtn);
+        });
     </script>
 </body>
 

@@ -5,6 +5,8 @@ import threading
 import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
+
+import requests
 from flask import Flask, render_template, request, jsonify, redirect
 from stravalib import Client
 
@@ -15,13 +17,94 @@ DEFAULT_CLIENT_ID = "117705"
 DEFAULT_CLIENT_SECRET = "fb23832768654cfe5ffa53ee6eb80e349b0d6461"
 PORT = int(os.environ.get("PORT", "5001"))
 REDIRECT_URI = f"http://127.0.0.1:{PORT}/authorization"
-SCOPE = "read,activity:read"
+SCOPE = "read,activity:read,profile:read_all"
 
 # 活动数据缓存配置
 CACHE_FILE = "activities_cache.json"
 CACHE_VERSION = 2  # 缓存结构版本，字段变更时递增以触发全量同步
 AUTO_SYNC_INTERVAL_SECONDS = 2 * 60 * 60  # 每 2 小时自动同步一次
 SYNC_BUFFER_MINUTES = 5  # 增量同步时往回多查 5 分钟，避免漏掉离线上传的活动
+
+# 运动员信息缓存配置（减少 Strava API 调用）
+ATHLETE_CACHE_FILE = "athlete_cache.json"
+ATHLETE_CACHE_TTL_SECONDS = 3600  # 1 小时
+
+
+def _token_fingerprint():
+    """用 access_token 后 8 位作为当前授权的指纹，用于缓存失效判断。"""
+    token = session_state.get("access_token")
+    return token[-8:] if token else None
+
+
+def load_athlete_cache():
+    """加载运动员信息缓存。"""
+    try:
+        with open(ATHLETE_CACHE_FILE, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+            if not isinstance(cache, dict):
+                return {}
+            return cache
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_athlete_cache(cache):
+    """保存运动员信息缓存。"""
+    with open(ATHLETE_CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+
+def clear_athlete_cache():
+    """清除运动员信息缓存（换账号/重新授权时调用）。"""
+    try:
+        os.remove(ATHLETE_CACHE_FILE)
+    except FileNotFoundError:
+        pass
+
+
+def get_cached_athlete():
+    """获取未过期的运动员信息缓存，token 变化时自动失效。"""
+    cache = load_athlete_cache()
+    fp = _token_fingerprint()
+    if not fp or cache.get("token_fp") != fp:
+        return None
+    cached_at = cache.get("cached_at")
+    if not cached_at or time.time() - cached_at > ATHLETE_CACHE_TTL_SECONDS:
+        return None
+    return cache.get("athlete")
+
+
+def set_cached_athlete(athlete):
+    """缓存运动员信息。"""
+    save_athlete_cache({
+        "token_fp": _token_fingerprint(),
+        "cached_at": time.time(),
+        "athlete": athlete,
+        "zones": load_athlete_cache().get("zones"),
+        "zones_cached_at": load_athlete_cache().get("zones_cached_at"),
+    })
+
+
+def get_cached_zones():
+    """获取未过期的心率区间缓存，token 变化时自动失效。"""
+    cache = load_athlete_cache()
+    fp = _token_fingerprint()
+    if not fp or cache.get("token_fp") != fp:
+        return None
+    cached_at = cache.get("zones_cached_at")
+    if not cached_at or time.time() - cached_at > ATHLETE_CACHE_TTL_SECONDS:
+        return None
+    return cache.get("zones")
+
+
+def set_cached_zones(zones):
+    """缓存心率区间。"""
+    cache = load_athlete_cache()
+    cache["token_fp"] = _token_fingerprint()
+    cache["zones_cached_at"] = time.time()
+    cache["zones"] = zones
+    save_athlete_cache(cache)
+
 
 # 保存授权流程的结果
 # 在本地单用户场景下用全局状态即可
@@ -117,6 +200,9 @@ def authorization_callback():
         session_state["client"] = client
         client.access_token = access_token
 
+        # 重新授权后清掉旧的运动员信息缓存
+        clear_athlete_cache()
+
     except Exception as e:
         return redirect(f"/?error={urllib.parse.quote(str(e))}")
 
@@ -160,25 +246,226 @@ def to_str(value):
     return str(value)
 
 
+def _to_iso(value):
+    """把 datetime/stravalib 时间对象转成 ISO 字符串。"""
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _serialize_gear(gear_list):
+    """把 stravalib 的装备列表序列化。"""
+    if not gear_list:
+        return []
+    result = []
+    for g in gear_list:
+        result.append({
+            "id": getattr(g, "id", None),
+            "primary": bool(getattr(g, "primary", False)),
+            "name": to_str(getattr(g, "name", None)),
+            "resource_state": to_number(getattr(g, "resource_state", None)),
+            "distance": to_number(getattr(g, "distance", None)),
+        })
+    return result
+
+
+def _serialize_clubs(clubs):
+    """把 stravalib 的俱乐部列表序列化。"""
+    if not clubs:
+        return []
+    result = []
+    for c in clubs:
+        result.append({
+            "id": getattr(c, "id", None),
+            "name": to_str(getattr(c, "name", None)),
+            "resource_state": to_number(getattr(c, "resource_state", None)),
+            "member_count": to_number(getattr(c, "member_count", None)),
+            "sport_type": to_str(getattr(c, "sport_type", None)),
+            "url": getattr(c, "url", None),
+        })
+    return result
+
+
 @app.route("/athlete")
 def get_athlete():
-    """使用已保存的 token 获取当前运动员信息。"""
+    """使用已保存的 token 获取当前运动员信息，并做本地缓存。
+
+    返回字段与 Strava API /v3/athlete（DetailedAthlete）保持一致。
+    """
+    import traceback
+
     client = session_state["client"]
     if not client:
         return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
 
+    cached = get_cached_athlete()
+    if cached is not None:
+        return jsonify(cached)
+
     try:
         athlete = client.get_athlete()
-        return jsonify(
-            {
-                "id": athlete.id,
-                "firstname": athlete.firstname,
-                "lastname": athlete.lastname,
-                "city": getattr(athlete, "city", None),
-                "country": getattr(athlete, "country", None),
-            }
-        )
     except Exception as e:
+        print(f"[/athlete] 调用 client.get_athlete() 失败: {e}")
+        traceback.print_exc()
+        return jsonify({"error": f"调用 Strava 失败: {e}"}), 500
+
+    result = {"_fetch_errors": []}
+
+    def safe(field, getter):
+        try:
+            return getter()
+        except Exception as e:
+            result["_fetch_errors"].append(f"{field}: {e}")
+            return None
+
+    try:
+        result.update({
+            "id": safe("id", lambda: athlete.id),
+            "username": safe("username", lambda: to_str(getattr(athlete, "username", None))),
+            "resource_state": safe("resource_state", lambda: to_number(getattr(athlete, "resource_state", None))),
+            "firstname": safe("firstname", lambda: to_str(getattr(athlete, "firstname", None))),
+            "lastname": safe("lastname", lambda: to_str(getattr(athlete, "lastname", None))),
+            "city": safe("city", lambda: to_str(getattr(athlete, "city", None))),
+            "state": safe("state", lambda: to_str(getattr(athlete, "state", None))),
+            "country": safe("country", lambda: to_str(getattr(athlete, "country", None))),
+            "sex": safe("sex", lambda: to_str(getattr(athlete, "sex", None))),
+            "premium": safe("premium", lambda: bool(getattr(athlete, "premium", False))),
+            "created_at": safe("created_at", lambda: _to_iso(getattr(athlete, "created_at", None))),
+            "updated_at": safe("updated_at", lambda: _to_iso(getattr(athlete, "updated_at", None))),
+            "badge_type_id": safe("badge_type_id", lambda: to_number(getattr(athlete, "badge_type_id", None))),
+            "profile_medium": safe("profile_medium", lambda: getattr(athlete, "profile_medium", None)),
+            "profile": safe("profile", lambda: getattr(athlete, "profile", None)),
+            "friend": safe("friend", lambda: getattr(athlete, "friend", None)),
+            "follower": safe("follower", lambda: getattr(athlete, "follower", None)),
+            "follower_count": safe("follower_count", lambda: to_number(getattr(athlete, "follower_count", None))),
+            "friend_count": safe("friend_count", lambda: to_number(getattr(athlete, "friend_count", None))),
+            "mutual_friend_count": safe("mutual_friend_count", lambda: to_number(getattr(athlete, "mutual_friend_count", None))),
+            "athlete_type": safe("athlete_type", lambda: to_number(getattr(athlete, "athlete_type", None))),
+            "date_preference": safe("date_preference", lambda: to_str(getattr(athlete, "date_preference", None))),
+            "measurement_preference": safe("measurement_preference", lambda: to_str(getattr(athlete, "measurement_preference", None))),
+            "clubs": safe("clubs", lambda: _serialize_clubs(getattr(athlete, "clubs", None))),
+            "ftp": safe("ftp", lambda: to_number(getattr(athlete, "ftp", None))),
+            "weight": safe("weight", lambda: to_number(getattr(athlete, "weight", None))),
+            "bikes": safe("bikes", lambda: _serialize_gear(getattr(athlete, "bikes", None))),
+            "shoes": safe("shoes", lambda: _serialize_gear(getattr(athlete, "shoes", None))),
+        })
+    except Exception as e:
+        print(f"[/athlete] 序列化运动员信息失败: {e}")
+        traceback.print_exc()
+        return jsonify({"error": f"序列化运动员信息失败: {e}"}), 500
+
+    if not result.get("_fetch_errors"):
+        result.pop("_fetch_errors", None)
+
+    set_cached_athlete(result)
+    return jsonify(result)
+
+
+def _estimate_hr_zones_from_cache():
+    """从本地缓存的历史活动中估算运动员的心率区间。
+
+    取 max_heartrate 的 99 分位数作为估算最大心率，再按常见百分比划分 5 区：
+    Z1: 0–60%, Z2: 60–70%, Z3: 70–80%, Z4: 80–90%, Z5: 90–100%。
+    输出格式与 Strava /athlete/zones 保持一致（distribution_buckets）。
+    """
+    cache = load_cache()
+    activities = cache.get("activities", [])
+    max_hrs = [
+        a["max_heartrate"]
+        for a in activities
+        if a.get("max_heartrate") and 30 < a["max_heartrate"] < 250
+    ]
+    if not max_hrs:
+        return None
+
+    max_hrs_sorted = sorted(max_hrs)
+    # 用 99 分位数，避免传感器异常峰值把区间拉得太高
+    idx = int(len(max_hrs_sorted) * 0.99)
+    estimated_max_hr = int(max_hrs_sorted[max(0, min(idx, len(max_hrs_sorted) - 1))])
+
+    def pct(p):
+        return int(round(estimated_max_hr * p))
+
+    return {
+        "type": "heart_rate",
+        "source": "estimated",
+        "estimated_max_hr": estimated_max_hr,
+        "custom_zones": False,
+        "resource_state": 3,
+        "sensor_based": False,
+        "distribution_buckets": [
+            {"min": 0, "max": pct(0.60), "time": None},
+            {"min": pct(0.60), "max": pct(0.70), "time": None},
+            {"min": pct(0.70), "max": pct(0.80), "time": None},
+            {"min": pct(0.80), "max": pct(0.90), "time": None},
+            {"min": pct(0.90), "max": estimated_max_hr, "time": None},
+        ],
+    }
+
+
+@app.route("/athlete/zones")
+def get_athlete_zones():
+    """使用已保存的 token 直接调用 Strava /v3/athlete/zones 获取心率/功率区间。
+
+    需要 profile:read_all scope。若 API 调用失败或没有数据，则根据本地缓存的历史
+    活动数据估算心率区间并返回，保证页面不空白。
+    """
+    import traceback
+
+    client = session_state["client"]
+    if not client:
+        return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
+
+    cached = get_cached_zones()
+    # 旧缓存是对象（{heart_rate, power}），新格式是数组；旧格式直接废弃重取
+    if cached is not None and isinstance(cached, list):
+        return jsonify(cached)
+
+    token = session_state.get("access_token")
+    try:
+        response = requests.get(
+            "https://www.strava.com/api/v3/athlete/zones",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        print(f"[/athlete/zones] Strava API status={response.status_code}, body preview={response.text[:200]}")
+        response.raise_for_status()
+        zones = response.json()
+        # 保证返回的是数组
+        if not isinstance(zones, list):
+            zones = [zones] if zones else []
+
+        # 如果没有心率区间数据，尝试根据本地活动估算补充
+        has_hr = any(z.get("type") == "heart_rate" for z in zones)
+        if not has_hr:
+            estimated = _estimate_hr_zones_from_cache()
+            if estimated:
+                zones.append(estimated)
+
+        set_cached_zones(zones)
+        return jsonify(zones)
+    except requests.exceptions.RequestException as e:
+        print(f"[/athlete/zones] 调用 Strava API 失败: {e}")
+        traceback.print_exc()
+        # API 调用失败时，返回估算区间让页面不至于空白
+        estimated = _estimate_hr_zones_from_cache()
+        if estimated:
+            result = [estimated]
+            set_cached_zones(result)
+            return jsonify(result)
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        print(f"[/athlete/zones] 处理心率区间失败: {e}")
+        traceback.print_exc()
+        estimated = _estimate_hr_zones_from_cache()
+        if estimated:
+            result = [estimated]
+            set_cached_zones(result)
+            return jsonify(result)
         return jsonify({"error": str(e)}), 500
 
 
@@ -601,6 +888,51 @@ def hr_zones():
         "hours": [round(s / 3600, 2) for s in zone_seconds],
         "counts": counts,
     })
+
+
+_RIDE_TYPES = {"Ride", "VirtualRide", "EBikeRide"}
+
+
+def _is_ride(activity):
+    """判断活动是否为骑行类。优先用 sport_type，回退到 type。"""
+    return (activity.get("sport_type") or activity.get("type") or "") in _RIDE_TYPES
+
+
+@app.route("/chart/top-distance")
+def top_distance():
+    """返回里程排名前 20 的骑行活动。"""
+    cache = load_cache()
+    activities = [a for a in cache.get("activities", []) if _is_ride(a)]
+    top = sorted(activities, key=lambda a: a.get("distance") or 0, reverse=True)[:20]
+    return jsonify([_activity_summary(a) for a in top])
+
+
+@app.route("/chart/top-elevation")
+def top_elevation():
+    """返回爬升排名前 20 的骑行活动。"""
+    cache = load_cache()
+    activities = [a for a in cache.get("activities", []) if _is_ride(a)]
+    top = sorted(activities, key=lambda a: a.get("total_elevation_gain") or 0, reverse=True)[:20]
+    return jsonify([_activity_summary(a) for a in top])
+
+
+def _activity_summary(a):
+    """返回给图表用的精简活动字段。"""
+    return {
+        "id": a.get("id"),
+        "name": a.get("name"),
+        "type": a.get("type"),
+        "sport_type": a.get("sport_type"),
+        "start_date": a.get("start_date"),
+        "distance": a.get("distance"),
+        "moving_time": a.get("moving_time"),
+        "elapsed_time": a.get("elapsed_time"),
+        "total_elevation_gain": a.get("total_elevation_gain"),
+        "average_speed": a.get("average_speed"),
+        "max_heartrate": a.get("max_heartrate"),
+        "average_heartrate": a.get("average_heartrate"),
+        "average_watts": a.get("average_watts"),
+    }
 
 
 @app.route('/chart/years')
