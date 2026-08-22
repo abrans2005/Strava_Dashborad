@@ -905,7 +905,8 @@
                     const width = ((b.max - b.min) / effectiveTotal) * 100;
                     const color = zoneColors[i % zoneColors.length];
                     const rangeText = b.hasMax ? `${b.min}-${b.max}` : `${b.min}+`;
-                    const label = width > 10 ? rangeText : '';
+                    // 在区间段上显示心率/功率上限数字
+                    const label = width > 8 ? (b.hasMax ? String(b.max) : '+') : '';
                     const timeText = b.time ? ' · 时间 ' + formatTimeSeconds(b.time) : '';
                     return `<div class="zone-segment" style="flex:${Math.max(width, 1)};background:${color};" title="Z${i + 1}: ${rangeText} ${unit}${timeText}"><span class="segment-label">${label}</span></div>`;
                 }).join('');
