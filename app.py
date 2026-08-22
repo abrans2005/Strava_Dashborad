@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import threading
 import time
@@ -455,6 +456,150 @@ def chart():
         "metric": metric,
         "series": series,
         "summary": summary,
+    })
+
+
+def _filter_activities_by_date(activities, year=None, month=None):
+    """按年份 / 月份过滤活动。"""
+    def match(a):
+        sd = a.get("start_date")
+        if not sd:
+            return False
+        try:
+            dt = datetime.fromisoformat(sd)
+        except Exception:
+            return False
+        if year is not None and dt.year != year:
+            return False
+        if month is not None and dt.month != month:
+            return False
+        return True
+
+    return [a for a in activities if match(a)]
+
+
+@app.route("/chart/power-distribution")
+def power_distribution():
+    """
+    返回平均功率的直方图分布，并叠加正态分布拟合曲线。
+    Y 轴使用「活动时间（小时）」加权，更能反映训练负荷分布。
+    支持按 year / month 过滤。
+    """
+    cache = load_cache()
+    activities = cache.get("activities", [])
+
+    year = request.args.get("year", type=int)
+    month = request.args.get("month", type=int)
+    filtered = _filter_activities_by_date(activities, year=year, month=month)
+
+    items = [
+        (a["average_watts"], a.get("moving_time", 0) or 0)
+        for a in filtered
+        if a.get("average_watts") is not None
+    ]
+
+    if not items:
+        return jsonify({"labels": [], "hours": [], "counts": [], "curve": [], "mean": None, "std": None})
+
+    total_time = sum(t for _, t in items)
+    if total_time <= 0:
+        return jsonify({"labels": [], "hours": [], "counts": [], "curve": [], "mean": None, "std": None})
+
+    # 按活动时间加权的均值与标准差
+    weighted_mean = sum(v * t for v, t in items) / total_time
+    weighted_var = sum(t * (v - weighted_mean) ** 2 for v, t in items) / total_time
+    std = math.sqrt(weighted_var)
+
+    bin_width = 25  # 功率区间宽度（W）
+    values_only = [v for v, _ in items]
+    min_v = min(values_only)
+    max_v = max(values_only)
+    start = int((min_v // bin_width) * bin_width)
+    end = int(((max_v // bin_width) + 1) * bin_width)
+    # 至少保证 4 个区间，让图表不会太挤
+    if end - start < bin_width * 4:
+        end = start + bin_width * 4
+
+    bins = list(range(start, end + bin_width, bin_width))
+    bin_seconds = [0] * (len(bins) - 1)
+    counts = [0] * (len(bins) - 1)
+
+    for v, t in items:
+        idx = int((v - start) // bin_width)
+        if idx < 0:
+            idx = 0
+        elif idx >= len(bin_seconds):
+            idx = len(bin_seconds) - 1
+        bin_seconds[idx] += t
+        counts[idx] += 1
+
+    labels = [f"{bins[i]}-{bins[i + 1]} W" for i in range(len(bins) - 1)]
+    hours = [round(s / 3600, 2) for s in bin_seconds]
+    total_hours = sum(hours)
+
+    # 正态分布拟合曲线：在每个区间中点计算 PDF，再按总时长缩放
+    curve = []
+    if std and std > 0:
+        for i in range(len(bins) - 1):
+            x = bins[i] + bin_width / 2
+            pdf = (1 / (std * math.sqrt(2 * math.pi))) * math.exp(
+                -((x - weighted_mean) ** 2) / (2 * weighted_var)
+            )
+            curve.append(round(pdf * total_hours * bin_width, 2))
+    else:
+        curve = [0] * len(hours)
+
+    return jsonify({
+        "labels": labels,
+        "hours": hours,
+        "counts": counts,
+        "curve": curve,
+        "mean": round(weighted_mean, 1),
+        "std": round(std, 1),
+    })
+
+
+@app.route("/chart/hr-zones")
+def hr_zones():
+    """
+    返回平均心率区间分布。
+    Y 轴使用「活动时间（小时）」加权。
+    支持按 year / month 过滤。
+    """
+    cache = load_cache()
+    activities = cache.get("activities", [])
+
+    year = request.args.get("year", type=int)
+    month = request.args.get("month", type=int)
+    filtered = _filter_activities_by_date(activities, year=year, month=month)
+
+    items = [
+        (a["average_heartrate"], a.get("moving_time", 0) or 0)
+        for a in filtered
+        if a.get("average_heartrate") is not None
+    ]
+
+    zones = [
+        {"label": "<120 bpm", "min": 0, "max": 120},
+        {"label": "120-140 bpm", "min": 120, "max": 140},
+        {"label": "140-160 bpm", "min": 140, "max": 160},
+        {"label": "160-180 bpm", "min": 160, "max": 180},
+        {"label": ">180 bpm", "min": 180, "max": None},
+    ]
+
+    zone_seconds = [0] * len(zones)
+    counts = [0] * len(zones)
+    for v, t in items:
+        for i, z in enumerate(zones):
+            if v >= z["min"] and (z["max"] is None or v < z["max"]):
+                zone_seconds[i] += t
+                counts[i] += 1
+                break
+
+    return jsonify({
+        "labels": [z["label"] for z in zones],
+        "hours": [round(s / 3600, 2) for s in zone_seconds],
+        "counts": counts,
     })
 
 

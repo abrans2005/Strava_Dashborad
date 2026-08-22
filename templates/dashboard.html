@@ -282,6 +282,20 @@
             height: 380px;
         }
 
+        .chart-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .chart-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+        }
+
         /* 数据表格 */
         .data-table {
             width: 100%;
@@ -413,6 +427,9 @@
                     <button class="menu-item" onclick="loadActivities(this)">
                         活动列表
                     </button>
+                    <button class="menu-item" onclick="loadChart(this)">
+                        图表分析
+                    </button>
                     <button class="menu-item" disabled>
                         好友列表 <span class="menu-badge">预留</span>
                     </button>
@@ -431,7 +448,6 @@
                     <h2 id="page-title">运动员信息</h2>
                     <div style="display:flex;gap:8px;align-items:center;">
                         <button class="btn-back" onclick="location.href='/'">返回登录页</button>
-                        <button class="btn-back" id="btn-chart" onclick="loadChart()">图表分析</button>
                     </div>
                 </div>
                 <div class="content-body empty" id="result">点击左侧菜单调用接口...</div>
@@ -574,6 +590,8 @@
 
         // --- 图表分析 ---
         let chartInstance = null;
+        let powerChartInstance = null;
+        let hrChartInstance = null;
 
         function buildChartControls() {
             return `
@@ -619,6 +637,20 @@
                         <canvas id="chartCanvas"></canvas>
                     </div>
                 </div>
+                <div class="chart-row">
+                    <div class="chart-card">
+                        <div class="chart-title">平均功率分布</div>
+                        <div class="chart-wrapper" style="height:280px;">
+                            <canvas id="powerDistCanvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title">心率区间分布</div>
+                        <div class="chart-wrapper" style="height:280px;">
+                            <canvas id="hrZoneCanvas"></canvas>
+                        </div>
+                    </div>
+                </div>
             `;
         }
 
@@ -658,14 +690,30 @@
 
         async function fetchAndRenderStats(year, month, metric) {
             try {
-                let qs = [];
-                if (year) qs.push('year=' + encodeURIComponent(year));
-                if (month) qs.push('month=' + encodeURIComponent(month));
-                if (metric) qs.push('metric=' + encodeURIComponent(metric));
-                const url = '/chart' + (qs.length ? ('?' + qs.join('&')) : '');
-                const res = await fetch(url);
-                const data = await res.json();
-                if (!res.ok) {
+                let baseQs = [];
+                if (year) baseQs.push('year=' + encodeURIComponent(year));
+                if (month) baseQs.push('month=' + encodeURIComponent(month));
+
+                let metricQs = [...baseQs];
+                if (metric) metricQs.push('metric=' + encodeURIComponent(metric));
+
+                const mainUrl = '/chart' + (metricQs.length ? ('?' + metricQs.join('&')) : '');
+                const powerUrl = '/chart/power-distribution' + (baseQs.length ? ('?' + baseQs.join('&')) : '');
+                const hrUrl = '/chart/hr-zones' + (baseQs.length ? ('?' + baseQs.join('&')) : '');
+
+                const [mainRes, powerRes, hrRes] = await Promise.all([
+                    fetch(mainUrl),
+                    fetch(powerUrl),
+                    fetch(hrUrl)
+                ]);
+
+                const [data, powerData, hrData] = await Promise.all([
+                    mainRes.json(),
+                    powerRes.json(),
+                    hrRes.json()
+                ]);
+
+                if (!mainRes.ok) {
                     setError('图表分析', '获取失败: ' + (data.error || '未知错误'));
                     return;
                 }
@@ -705,6 +753,13 @@
                 }
 
                 renderChart(labels, series, metric || data.metric || 'metric');
+
+                if (powerRes.ok) {
+                    renderPowerDist(powerData);
+                }
+                if (hrRes.ok) {
+                    renderHRZones(hrData);
+                }
             } catch (err) {
                 setError('图表分析', '请求出错: ' + err.message);
             }
@@ -810,6 +865,182 @@
             };
 
             chartInstance = new Chart(ctx, cfg);
+        }
+
+        function renderPowerDist(data) {
+            const ctx = document.getElementById('powerDistCanvas').getContext('2d');
+            if (powerChartInstance) {
+                powerChartInstance.destroy();
+                powerChartInstance = null;
+            }
+
+            const labels = data.labels || [];
+            const hours = (data.hours || []).map(v => Number(v) || 0);
+            const counts = (data.counts || []).map(v => Number(v) || 0);
+            const curve = (data.curve || []).map(v => Number(v) || 0);
+
+            if (!labels.length) {
+                // 没有功率数据时清空画布
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                return;
+            }
+
+            const gradient = ctx.createLinearGradient(0, 0, 0, 280);
+            gradient.addColorStop(0, 'rgba(252, 76, 2, 0.7)');
+            gradient.addColorStop(1, 'rgba(252, 76, 2, 0.15)');
+
+            powerChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            type: 'line',
+                            label: '正态分布拟合',
+                            data: curve,
+                            borderColor: '#c23a00',
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            tension: 0.4,
+                            yAxisID: 'y',
+                            order: 1
+                        },
+                        {
+                            type: 'bar',
+                            label: '活动时间',
+                            data: hours,
+                            backgroundColor: gradient,
+                            borderColor: '#fc4c02',
+                            borderWidth: 1,
+                            borderRadius: 4,
+                            borderSkipped: false,
+                            yAxisID: 'y',
+                            order: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            align: 'end',
+                            labels: { usePointStyle: true, boxWidth: 8, font: { size: 12 } }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(40, 40, 40, 0.9)',
+                            titleFont: { size: 13 },
+                            bodyFont: { size: 13 },
+                            padding: 10,
+                            cornerRadius: 8,
+                            callbacks: {
+                                title: (ctx) => '功率区间: ' + (ctx[0] ? ctx[0].label : ''),
+                                label: (ctx) => {
+                                    const idx = ctx.dataIndex;
+                                    if (ctx.dataset.type === 'line') {
+                                        return `正态分布拟合: ${ctx.parsed.y} h`;
+                                    }
+                                    const count = counts[idx] !== undefined ? counts[idx] : '-';
+                                    return [
+                                        `活动时间: ${ctx.parsed.y} h`,
+                                        `活动数量: ${count}`
+                                    ];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#666', font: { size: 11 } }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(0,0,0,0.05)' },
+                            ticks: { color: '#666', font: { size: 12 } },
+                            title: { display: true, text: '活动时间 (h)', color: '#999', font: { size: 12 } }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderHRZones(data) {
+            const ctx = document.getElementById('hrZoneCanvas').getContext('2d');
+            if (hrChartInstance) {
+                hrChartInstance.destroy();
+                hrChartInstance = null;
+            }
+
+            const labels = data.labels || [];
+            const hours = (data.hours || []).map(v => Number(v) || 0);
+            const counts = (data.counts || []).map(v => Number(v) || 0);
+
+            if (!labels.length) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                return;
+            }
+
+            const gradient = ctx.createLinearGradient(0, 0, 0, 280);
+            gradient.addColorStop(0, 'rgba(66, 153, 225, 0.7)');
+            gradient.addColorStop(1, 'rgba(66, 153, 225, 0.15)');
+
+            hrChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '活动时间',
+                        data: hours,
+                        backgroundColor: gradient,
+                        borderColor: '#3182ce',
+                        borderWidth: 1,
+                        borderRadius: 6,
+                        borderSkipped: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(40, 40, 40, 0.9)',
+                            titleFont: { size: 13 },
+                            bodyFont: { size: 13 },
+                            padding: 10,
+                            cornerRadius: 8,
+                            callbacks: {
+                                title: (ctx) => '心率区间: ' + (ctx[0] ? ctx[0].label : ''),
+                                label: (ctx) => {
+                                    const idx = ctx.dataIndex;
+                                    const count = counts[idx] !== undefined ? counts[idx] : '-';
+                                    return [
+                                        `活动时间: ${ctx.parsed.y} h`,
+                                        `活动数量: ${count}`
+                                    ];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#666', font: { size: 12 } }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(0,0,0,0.05)' },
+                            ticks: { color: '#666', font: { size: 12 } },
+                            title: { display: true, text: '活动时间 (h)', color: '#999', font: { size: 12 } }
+                        }
+                    }
+                }
+            });
         }
 
         // Wrap a table HTML with scroll containers: a top horizontal scrollbar and the actual scroll area
