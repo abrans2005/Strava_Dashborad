@@ -610,6 +610,83 @@
             padding: 24px 0;
         }
 
+        /* 活动分析面板 */
+        .analysis-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .analysis-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .analysis-meta {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            color: #666;
+            font-size: 13px;
+        }
+
+        .analysis-meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .analysis-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 900px) {
+            .analysis-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .analysis-chart-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .analysis-chart-card .chart-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+        }
+
+        .analysis-chart-wrapper {
+            position: relative;
+            height: 260px;
+        }
+
+        .btn-analyze {
+            padding: 4px 10px;
+            border: none;
+            border-radius: 6px;
+            background: #fc4c02;
+            color: white;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-analyze:hover {
+            background: #e04400;
+        }
+
         /* 数据表格 */
         .data-table {
             width: 100%;
@@ -1171,6 +1248,7 @@
         let hrChartInstance = null;
         let topElevationChartInstance = null;
         let topDistanceChartInstance = null;
+        let analysisChartInstances = {};
 
         function buildChartControls() {
             return `
@@ -1871,6 +1949,460 @@
             });
         }
 
+        // --- 活动流数据分析 ---
+        function destroyAnalysisCharts() {
+            Object.values(analysisChartInstances).forEach(chart => {
+                if (chart) chart.destroy();
+            });
+            analysisChartInstances = {};
+        }
+
+        function _analysisDistanceLabels(distance_km) {
+            return (distance_km || []).map(d => Number(d).toFixed(1));
+        }
+
+        function _mkAnalysisGradient(ctx, colorStart, colorEnd) {
+            const gradient = ctx.createLinearGradient(0, 0, 0, 260);
+            gradient.addColorStop(0, colorStart);
+            gradient.addColorStop(1, colorEnd);
+            return gradient;
+        }
+
+        function renderElevationProfile(data) {
+            const ctx = document.getElementById('elevationCanvas').getContext('2d');
+            const labels = _analysisDistanceLabels(data.distance_km);
+            const altitudes = (data.altitude || []).map(v => Number(v) || 0);
+            const gradient = _mkAnalysisGradient(ctx, 'rgba(34, 197, 94, 0.5)', 'rgba(34, 197, 94, 0.05)');
+            analysisChartInstances.elevation = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '海拔 (m)',
+                        data: altitudes,
+                        borderColor: '#16a34a',
+                        backgroundColor: gradient,
+                        borderWidth: 2,
+                        fill: true,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
+                        y: { beginAtZero: false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '海拔 (m)', color: '#999', font: { size: 12 } } }
+                    }
+                }
+            });
+        }
+
+        function renderHRCurve(data) {
+            const ctx = document.getElementById('hrCanvas').getContext('2d');
+            const labels = _analysisDistanceLabels(data.distance_km);
+            const hr = (data.heartrate || []).map(v => Number(v) || 0);
+            const avg = data.summary && data.summary.avg_heartrate ? Number(data.summary.avg_heartrate) : null;
+            const avgData = avg !== null ? hr.map(() => avg) : [];
+            analysisChartInstances.hr = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '心率 (bpm)',
+                            data: hr,
+                            borderColor: '#ef4444',
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            tension: 0.3,
+                            fill: false
+                        },
+                        {
+                            label: `平均心率 ${avg || '-'} bpm`,
+                            data: avgData,
+                            borderColor: '#ef4444',
+                            borderWidth: 1,
+                            borderDash: [6, 4],
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 6, font: { size: 11 } } } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
+                        y: { beginAtZero: false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '心率 (bpm)', color: '#999', font: { size: 12 } } }
+                    }
+                }
+            });
+        }
+
+        function renderSpeedCurve(data) {
+            const ctx = document.getElementById('speedCanvas').getContext('2d');
+            const labels = _analysisDistanceLabels(data.distance_km);
+            const speed = (data.velocity_kmh || []).map(v => Number(v) || 0);
+            const avg = data.summary && data.summary.avg_velocity_kmh ? Number(data.summary.avg_velocity_kmh) : null;
+            const avgData = avg !== null ? speed.map(() => avg) : [];
+            analysisChartInstances.speed = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '速度 (km/h)',
+                            data: speed,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: `平均速度 ${avg || '-'} km/h`,
+                            data: avgData,
+                            borderColor: '#3b82f6',
+                            borderWidth: 1,
+                            borderDash: [6, 4],
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 6, font: { size: 11 } } } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
+                        y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '速度 (km/h)', color: '#999', font: { size: 12 } } }
+                    }
+                }
+            });
+        }
+
+        function renderPowerCurve(data) {
+            const ctx = document.getElementById('powerCanvas').getContext('2d');
+            const labels = _analysisDistanceLabels(data.distance_km);
+            const watts = (data.watts || []).map(v => Number(v) || 0);
+            const avg = data.summary && data.summary.avg_watts ? Number(data.summary.avg_watts) : null;
+            const avgData = avg !== null ? watts.map(() => avg) : [];
+            if (!data.has_watts) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                return;
+            }
+            analysisChartInstances.power = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '功率 (W)',
+                            data: watts,
+                            borderColor: '#f97316',
+                            backgroundColor: 'rgba(249, 115, 22, 0.08)',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            tension: 0.3,
+                            fill: true
+                        },
+                        {
+                            label: `平均功率 ${avg || '-'} W`,
+                            data: avgData,
+                            borderColor: '#f97316',
+                            borderWidth: 1,
+                            borderDash: [6, 4],
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 6, font: { size: 11 } } } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
+                        y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '功率 (W)', color: '#999', font: { size: 12 } } }
+                    }
+                }
+            });
+        }
+
+        function renderHRPowerOverlay(data) {
+            const ctx = document.getElementById('hrPowerCanvas').getContext('2d');
+            const labels = _analysisDistanceLabels(data.distance_km);
+            const hr = (data.heartrate || []).map(v => Number(v) || 0);
+            const watts = (data.watts || []).map(v => Number(v) || 0);
+            analysisChartInstances.hrPower = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '心率 (bpm)',
+                            data: hr,
+                            borderColor: '#ef4444',
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            tension: 0.3,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: '功率 (W)',
+                            data: watts,
+                            borderColor: '#f97316',
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            tension: 0.3,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 6, font: { size: 11 } } } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
+                        y: { type: 'linear', display: true, position: 'left', grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#ef4444', font: { size: 12 } }, title: { display: true, text: '心率 (bpm)', color: '#ef4444', font: { size: 12 } } },
+                        y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#f97316', font: { size: 12 } }, title: { display: true, text: '功率 (W)', color: '#f97316', font: { size: 12 } } }
+                    }
+                }
+            });
+        }
+
+        function renderElevationGrade(data) {
+            const ctx = document.getElementById('elevationGradeCanvas').getContext('2d');
+            const labels = _analysisDistanceLabels(data.distance_km);
+            const altitude = (data.altitude || []).map(v => Number(v) || 0);
+            const grade = (data.grade || []).map(v => Number(v) || 0);
+            const climbs = data.summary && data.summary.climb_segments ? data.summary.climb_segments : [];
+            // 高亮爬坡段：构造背景色数组
+            const climbColors = grade.map((g, i) => {
+                const km = Number(data.distance_km[i]) || 0;
+                const inClimb = climbs.some(c => km >= c.start_km && km <= c.end_km);
+                return g > 5 || inClimb ? 'rgba(239, 68, 68, 0.6)' : 'rgba(34, 197, 94, 0.25)';
+            });
+            analysisChartInstances.elevationGrade = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '坡度 (%)',
+                            data: grade,
+                            backgroundColor: climbColors,
+                            borderWidth: 0,
+                            yAxisID: 'y1'
+                        },
+                        {
+                            type: 'line',
+                            label: '海拔 (m)',
+                            data: altitude,
+                            borderColor: '#16a34a',
+                            backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            tension: 0.3,
+                            fill: false,
+                            yAxisID: 'y'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 6, font: { size: 11 } } } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
+                        y: { type: 'linear', display: true, position: 'left', grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#16a34a', font: { size: 12 } }, title: { display: true, text: '海拔 (m)', color: '#16a34a', font: { size: 12 } } },
+                        y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '坡度 (%)', color: '#666', font: { size: 12 } } }
+                    }
+                }
+            });
+        }
+
+        function renderHRZoneDistribution(data) {
+            const ctx = document.getElementById('hrZoneCanvas').getContext('2d');
+            const stats = data.hr_zone_stats || [];
+            if (!stats.length) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                return;
+            }
+            const labels = stats.map(s => `Z${s.zone}`);
+            const hours = stats.map(s => s.hours);
+            const pcts = stats.map(s => s.pct);
+            const colors = ['#3b82f6', '#22c55e', '#eab308', '#f97316', '#ef4444'];
+            analysisChartInstances.hrZoneDist = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '时长 (h)',
+                        data: hours,
+                        backgroundColor: colors.slice(0, hours.length),
+                        borderRadius: 6,
+                        borderSkipped: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const s = stats[ctx.dataIndex];
+                                    return [`时长: ${s.hours} h`, `占比: ${s.pct}%`, s.label];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 12 } } },
+                        y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '时长 (h)', color: '#999', font: { size: 12 } } }
+                    }
+                }
+            });
+        }
+
+        function renderAnalysisCharts(data) {
+            destroyAnalysisCharts();
+            renderElevationProfile(data);
+            renderHRCurve(data);
+            renderSpeedCurve(data);
+            renderPowerCurve(data);
+            renderHRPowerOverlay(data);
+            renderElevationGrade(data);
+            renderHRZoneDistribution(data);
+        }
+
+        function buildAnalysisPanel(activity, data) {
+            const summary = data.summary || {};
+            const hasHR = data.has_hr;
+            const hasWatts = data.has_watts;
+            const hrInfo = hasHR ? `平均心率 ${summary.avg_heartrate || '-'} bpm` : '无心率数据';
+            const powerInfo = hasWatts ? `平均功率 ${summary.avg_watts || '-'} W` : '无功率数据';
+            const climbs = summary.climb_segments || [];
+            const climbHtml = climbs.length ? climbs.map(c => `<span>📈 ${c.start_km}-${c.end_km} km (${c.distance_km} km)</span>`).join('') : '<span>无显著爬坡段</span>';
+            return `
+                <div class="analysis-header">
+                    <div>
+                        <div class="analysis-title">${escapeHtml(activity.name)}</div>
+                        <div class="analysis-meta">
+                            <span>${formatDate(activity.start_date)}</span>
+                            <span>${formatDistance(activity.distance)}</span>
+                            <span>${formatTime(activity.moving_time)}</span>
+                            <span>${formatElevation(activity.total_elevation_gain)}</span>
+                            <span>${hrInfo}</span>
+                            <span>${powerInfo}</span>
+                        </div>
+                        <div class="analysis-meta" style="margin-top:6px;">
+                            <span>爬坡段 (>5%)：</span>${climbHtml}
+                        </div>
+                    </div>
+                    <button class="btn-primary" onclick="backToActivityList()">返回列表</button>
+                </div>
+                <div class="analysis-grid">
+                    <div class="analysis-chart-card">
+                        <div class="chart-title">海拔剖面</div>
+                        <div class="analysis-chart-wrapper"><canvas id="elevationCanvas"></canvas></div>
+                    </div>
+                    <div class="analysis-chart-card">
+                        <div class="chart-title">心率曲线</div>
+                        <div class="analysis-chart-wrapper"><canvas id="hrCanvas"></canvas></div>
+                    </div>
+                    <div class="analysis-chart-card">
+                        <div class="chart-title">速度曲线</div>
+                        <div class="analysis-chart-wrapper"><canvas id="speedCanvas"></canvas></div>
+                    </div>
+                    <div class="analysis-chart-card">
+                        <div class="chart-title">功率曲线</div>
+                        <div class="analysis-chart-wrapper"><canvas id="powerCanvas"></canvas></div>
+                    </div>
+                </div>
+                <div class="analysis-grid" style="margin-top:20px;">
+                    <div class="analysis-chart-card">
+                        <div class="chart-title">心率-功率联动</div>
+                        <div class="analysis-chart-wrapper"><canvas id="hrPowerCanvas"></canvas></div>
+                    </div>
+                    <div class="analysis-chart-card">
+                        <div class="chart-title">海拔-坡度联动（红色为 >5% 爬坡）</div>
+                        <div class="analysis-chart-wrapper"><canvas id="elevationGradeCanvas"></canvas></div>
+                    </div>
+                </div>
+                <div class="analysis-grid" style="margin-top:20px;">
+                    <div class="analysis-chart-card">
+                        <div class="chart-title">心率区间分布</div>
+                        <div class="analysis-chart-wrapper"><canvas id="hrZoneCanvas"></canvas></div>
+                    </div>
+                </div>
+                <div style="text-align:center;margin-top:24px;">
+                    <button class="btn-primary" onclick="backToActivityList()">返回列表</button>
+                </div>
+            `;
+        }
+
+        function backToActivityList() {
+            const btn = document.querySelector('.menu-item[onclick*="loadActivities"]');
+            if (btn) loadActivities(btn);
+        }
+
+        async function analyzeActivity(activityId) {
+            setLoading('活动分析');
+
+            try {
+                const [activityRes, streamsRes] = await Promise.all([
+                    fetch('/activities'),
+                    fetch(`/activities/${activityId}/streams`)
+                ]);
+
+                const activities = activityRes.ok ? await activityRes.json() : [];
+                const streamsData = streamsRes.ok ? await streamsRes.json() : null;
+
+                if (!streamsRes.ok) {
+                    const errorMsg = streamsData && streamsData.error ? streamsData.error : '未知错误';
+                    setError('活动分析', '获取流数据失败: ' + errorMsg);
+                    return;
+                }
+
+                const activity = activities.find(a => String(a.id) === String(activityId));
+                if (!activity) {
+                    setError('活动分析', '未找到对应活动');
+                    return;
+                }
+
+                setHtml('活动分析', buildAnalysisPanel(activity, streamsData));
+                renderAnalysisCharts(streamsData);
+            } catch (err) {
+                setError('活动分析', '请求出错: ' + err.message);
+            }
+        }
+
         // Wrap a table HTML with scroll containers: a top horizontal scrollbar and the actual scroll area
         function buildScrollableTable(html) {
             return `
@@ -1937,6 +2469,7 @@
                     <td class="text-right">${formatWatts(a.weighted_average_watts)}</td>
                     <td class="text-right">${formatWatts(a.max_watts)}</td>
                     <td class="text-right">${formatSufferScore(a.suffer_score)}</td>
+                    <td><button class="btn-analyze" onclick="analyzeActivity(${a.id})">分析</button></td>
                 </tr>
             `).join('');
 
@@ -1961,6 +2494,7 @@
                             <th class="text-right">标准化功率</th>
                             <th class="text-right">最大功率</th>
                             <th class="text-right">强度评分</th>
+                            <th>操作</th>
                         </tr>
                     </thead>
                     <tbody>${rows}</tbody>

@@ -3,4 +3,5 @@
 activities_cache.json
 activities_cache.json.bak
 athlete_cache.json
+streams_cache/
 __pycache__/

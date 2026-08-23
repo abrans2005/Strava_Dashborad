@@ -469,6 +469,352 @@ def get_athlete_zones():
         return jsonify({"error": str(e)}), 500
 
 
+# ============== 活动流数据（Streams）缓存与分析 ==============
+
+STREAMS_CACHE_DIR = "streams_cache"
+STREAMS_CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 小时
+
+
+def _streams_cache_path(activity_id):
+    """返回某个活动流数据缓存文件路径。"""
+    return os.path.join(STREAMS_CACHE_DIR, f"{activity_id}.json")
+
+
+def _ensure_streams_cache_dir():
+    """确保流数据缓存目录存在。"""
+    os.makedirs(STREAMS_CACHE_DIR, exist_ok=True)
+
+
+def load_streams_cache(activity_id):
+    """加载某个活动的流数据缓存。"""
+    path = _streams_cache_path(activity_id)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+        if not isinstance(cache, dict):
+            return None
+        cached_at = cache.get("cached_at")
+        if not cached_at or time.time() - cached_at > STREAMS_CACHE_TTL_SECONDS:
+            return None
+        # token 变化时失效
+        if cache.get("token_fp") != _token_fingerprint():
+            return None
+        return cache.get("data")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def save_streams_cache(activity_id, data):
+    """保存某个活动的流数据缓存。"""
+    _ensure_streams_cache_dir()
+    path = _streams_cache_path(activity_id)
+    cache = {
+        "token_fp": _token_fingerprint(),
+        "cached_at": time.time(),
+        "data": data,
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+
+def _moving_average(data, window=7):
+    """对一维数组做简单移动平均平滑。"""
+    if not data:
+        return []
+    n = len(data)
+    if n <= window:
+        return data[:]
+    half = window // 2
+    result = []
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        vals = [data[j] for j in range(lo, hi) if data[j] is not None]
+        result.append(sum(vals) / len(vals) if vals else None)
+    return result
+
+
+def _compute_grade(distance, altitude):
+    """根据距离（米）和海拔（米）计算坡度百分比。"""
+    n = len(distance)
+    if n != len(altitude) or n < 2:
+        return [0.0] * n
+    grades = [0.0]
+    for i in range(1, n):
+        d = distance[i] - distance[i - 1]
+        h = altitude[i] - altitude[i - 1]
+        if d and d > 0:
+            grades.append((h / d) * 100)
+        else:
+            grades.append(grades[-1])
+    return grades
+
+
+def _downsample(data_lists, max_points=600):
+    """按索引均匀降采样多组等长序列。"""
+    n = len(data_lists[0]) if data_lists else 0
+    if n <= max_points:
+        return data_lists
+    step = n / max_points
+    result = [[] for _ in data_lists]
+    for i in range(max_points):
+        idx = int(i * step)
+        if idx >= n:
+            idx = n - 1
+        for j, lst in enumerate(data_lists):
+            result[j].append(lst[idx])
+    return result
+
+
+def _hr_zone_label(hr, hr_zones):
+    """根据心率区间配置判断某心率属于哪个区间，返回 0-based 索引。"""
+    if hr is None or hr_zones is None or not hr_zones:
+        return None
+    for i, z in enumerate(hr_zones):
+        min_hr = z.get("min")
+        max_hr = z.get("max")
+        if min_hr is None:
+            min_hr = 0
+        if max_hr is None or max_hr == -1:
+            # 最后一个区间无上界
+            if hr >= min_hr:
+                return i
+        elif min_hr <= hr < max_hr:
+            return i
+    return len(hr_zones) - 1
+
+
+def _get_hr_zones_from_athlete():
+    """从运动员缓存或默认获取心率区间 buckets。"""
+    cached = get_cached_zones()
+    if cached and isinstance(cached, list):
+        hr_zone = next((z for z in cached if z.get("type") == "heart_rate"), None)
+        if hr_zone and hr_zone.get("distribution_buckets"):
+            return hr_zone["distribution_buckets"]
+    # 默认五区（基于 190 最大心率估算）
+    return [
+        {"min": 0, "max": 114},
+        {"min": 114, "max": 133},
+        {"min": 133, "max": 152},
+        {"min": 152, "max": 171},
+        {"min": 171, "max": -1},
+    ]
+
+
+def _analyze_hr_zones(heartrate, time_stream, hr_zones):
+    """统计心率在各区间的累计时长（秒）和占比。"""
+    n = len(heartrate)
+    if n == 0 or not hr_zones:
+        return []
+    # 如果 time_stream 可用，用相邻点时间差；否则默认每点 1 秒
+    has_time = time_stream and len(time_stream) == n
+    zone_seconds = [0.0] * len(hr_zones)
+    total = 0.0
+    for i in range(n):
+        if heartrate[i] is None:
+            continue
+        zone_idx = _hr_zone_label(heartrate[i], hr_zones)
+        if zone_idx is None:
+            continue
+        if has_time and i > 0:
+            dt = time_stream[i] - time_stream[i - 1]
+            if dt is None or dt < 0 or dt > 30:
+                dt = 1
+        else:
+            dt = 1
+        zone_seconds[zone_idx] += dt
+        total += dt
+    result = []
+    for i, seconds in enumerate(zone_seconds):
+        z = hr_zones[i]
+        max_hr = z.get("max")
+        label = f"Z{i + 1}: {z.get('min', 0)}-{max_hr if max_hr and max_hr != -1 else '+'} bpm"
+        result.append({
+            "zone": i + 1,
+            "label": label,
+            "seconds": round(seconds, 1),
+            "hours": round(seconds / 3600, 2),
+            "pct": round(seconds / total * 100, 1) if total > 0 else 0,
+        })
+    return result
+
+
+def _find_climb_segments(distance_km, grade):
+    """找出坡度 > 5% 的连续爬坡段。"""
+    n = len(distance_km)
+    if n != len(grade):
+        return []
+    segments = []
+    in_climb = False
+    start_km = 0
+    for i in range(n):
+        if grade[i] is not None and grade[i] > 5:
+            if not in_climb:
+                in_climb = True
+                start_km = distance_km[i]
+        else:
+            if in_climb:
+                end_km = distance_km[max(0, i - 1)]
+                segments.append({
+                    "start_km": round(start_km, 2),
+                    "end_km": round(end_km, 2),
+                    "distance_km": round(end_km - start_km, 2),
+                })
+                in_climb = False
+    if in_climb:
+        segments.append({
+            "start_km": round(start_km, 2),
+            "end_km": round(distance_km[-1], 2),
+            "distance_km": round(distance_km[-1] - start_km, 2),
+        })
+    return segments
+
+
+@app.route("/activities/<int:activity_id>/streams")
+def get_activity_streams(activity_id):
+    """获取单个活动的流数据，做清洗、平滑、聚合后返回给前端。
+
+    请求 Strava keys: distance,altitude,heartrate,velocity_smooth,watts,
+    grade_smooth,time,latlng。
+    """
+    import traceback
+
+    if not session_state.get("client"):
+        return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
+
+    cached = load_streams_cache(activity_id)
+    if cached is not None:
+        return jsonify(cached)
+
+    token = session_state.get("access_token")
+    keys = "distance,altitude,heartrate,velocity_smooth,watts,grade_smooth,time,latlng"
+    url = f"https://www.strava.com/api/v3/activities/{activity_id}/streams"
+    try:
+        response = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            params={"keys": keys, "key_by_type": "true"},
+            timeout=60,
+        )
+        print(f"[/activities/{activity_id}/streams] Strava API status={response.status_code}")
+        response.raise_for_status()
+        raw = response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"[/activities/{activity_id}/streams] 调用失败: {e}")
+        traceback.print_exc()
+        return jsonify({"error": f"调用 Strava 失败: {e}"}), 500
+
+    # raw 可能是数组或对象（key_by_type=true 时为对象）
+    streams = {}
+    if isinstance(raw, dict):
+        streams = raw
+    elif isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict) and "type" in item:
+                streams[item["type"]] = item
+
+    distance_raw = streams.get("distance", {}).get("data") if isinstance(streams.get("distance"), dict) else []
+    altitude_raw = streams.get("altitude", {}).get("data") if isinstance(streams.get("altitude"), dict) else []
+    heartrate_raw = streams.get("heartrate", {}).get("data") if isinstance(streams.get("heartrate"), dict) else []
+    velocity_raw = streams.get("velocity_smooth", {}).get("data") if isinstance(streams.get("velocity_smooth"), dict) else []
+    watts_raw = streams.get("watts", {}).get("data") if isinstance(streams.get("watts"), dict) else []
+    grade_raw = streams.get("grade_smooth", {}).get("data") if isinstance(streams.get("grade_smooth"), dict) else []
+    time_raw = streams.get("time", {}).get("data") if isinstance(streams.get("time"), dict) else []
+
+    n = len(distance_raw) if distance_raw else 0
+    if n == 0:
+        return jsonify({"error": "Strava 返回的流数据为空"}), 404
+
+    # 对齐长度（某些流序列可能比 distance 短）
+    def align(seq):
+        if not seq:
+            return [None] * n
+        if len(seq) < n:
+            return seq + [None] * (n - len(seq))
+        return seq[:n]
+
+    distance = align(distance_raw)
+    altitude = align(altitude_raw)
+    heartrate = align(heartrate_raw)
+    velocity = align(velocity_raw)
+    watts = align(watts_raw)
+    grade = align(grade_raw)
+    time_stream = align(time_raw)
+
+    # 清洗 None 点：如果某个索引 distance 为 None，则整行丢弃
+    valid_indices = [i for i in range(n) if distance[i] is not None]
+    if not valid_indices:
+        return jsonify({"error": "流数据无效"}), 500
+
+    distance = [distance[i] for i in valid_indices]
+    altitude = [altitude[i] for i in valid_indices]
+    heartrate = [heartrate[i] for i in valid_indices]
+    velocity = [velocity[i] for i in valid_indices]
+    watts = [watts[i] for i in valid_indices]
+    grade = [grade[i] for i in valid_indices]
+    time_stream = [time_stream[i] for i in valid_indices]
+
+    distance_km = [round(d / 1000, 3) for d in distance]
+    velocity_kmh = [round(v * 3.6, 2) if v is not None else None for v in velocity]
+
+    # 若 Strava 未返回坡度，则根据海拔-距离计算
+    if not any(g is not None for g in grade) and any(a is not None for a in altitude):
+        grade = _compute_grade(distance, altitude)
+
+    # 对速度和功率做平滑
+    velocity_smooth = _moving_average(velocity_kmh, window=7)
+    watts_smooth = _moving_average(watts, window=7)
+
+    # 心率区间统计
+    hr_zones = _get_hr_zones_from_athlete()
+    hr_zone_stats = _analyze_hr_zones(heartrate, time_stream, hr_zones)
+
+    # 爬坡段
+    climb_segments = _find_climb_segments(distance_km, grade)
+
+    # 统计值
+    def avg(seq):
+        vals = [v for v in seq if v is not None]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    result = {
+        "activity_id": activity_id,
+        "distance_km": distance_km,
+        "altitude": altitude,
+        "heartrate": heartrate,
+        "velocity_kmh": velocity_smooth,
+        "watts": watts_smooth,
+        "grade": grade,
+        "time": time_stream,
+        "summary": {
+            "avg_heartrate": avg(heartrate),
+            "avg_velocity_kmh": avg(velocity_smooth),
+            "avg_watts": avg(watts_smooth),
+            "max_altitude": round(max([a for a in altitude if a is not None]), 1) if any(a is not None for a in altitude) else None,
+            "min_altitude": round(min([a for a in altitude if a is not None]), 1) if any(a is not None for a in altitude) else None,
+            "climb_segments": climb_segments,
+        },
+        "hr_zone_stats": hr_zone_stats,
+        "has_hr": any(h is not None for h in heartrate),
+        "has_watts": any(w is not None for w in watts),
+    }
+
+    # 降采样：如果点太多，按索引均匀采样
+    all_series = [result["distance_km"], result["altitude"], result["heartrate"], result["velocity_kmh"], result["watts"], result["grade"], result["time"]]
+    sampled = _downsample(all_series, max_points=600)
+    result["distance_km"] = sampled[0]
+    result["altitude"] = sampled[1]
+    result["heartrate"] = sampled[2]
+    result["velocity_kmh"] = sampled[3]
+    result["watts"] = sampled[4]
+    result["grade"] = sampled[5]
+    result["time"] = sampled[6]
+    # 降采样后爬坡段不必重新计算，使用原始统计即可
+
+    save_streams_cache(activity_id, result)
+    return jsonify(result)
+
+
 # ============== 活动数据缓存与增量同步 ==============
 
 def activity_to_dict(a):
