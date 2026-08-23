@@ -433,6 +433,55 @@
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
         }
 
+        .athlete-gear-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-top: 18px;
+        }
+
+        @media (max-width: 1020px) {
+            .athlete-gear-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .gear-select {
+            width: 100%;
+            padding: 8px 28px 8px 12px;
+            border: 1px solid #d0d0d0;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 12px;
+            background: #fff;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            cursor: pointer;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .gear-select:hover {
+            border-color: #bbb;
+        }
+
+        .gear-select:focus {
+            outline: none;
+            border-color: #fc4c02;
+            box-shadow: 0 0 0 3px rgba(252, 76, 2, 0.12);
+        }
+
+        .gear-detail {
+            font-size: 13px;
+            color: #555;
+            line-height: 1.8;
+        }
+
+        .gear-detail.hidden {
+            display: none;
+        }
+
         .athlete-list {
             display: flex;
             flex-direction: column;
@@ -496,10 +545,10 @@
 
         .zone-bar {
             display: flex;
-            height: 42px;
-            border-radius: 10px;
+            height: 28px;
+            border-radius: 8px;
             overflow: hidden;
-            margin-bottom: 14px;
+            margin-bottom: 10px;
             box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
         }
 
@@ -969,40 +1018,126 @@
             const bikes = Array.isArray(athlete.bikes) ? athlete.bikes : [];
             const shoes = Array.isArray(athlete.shoes) ? athlete.shoes : [];
 
-            const bikesHtml = bikes.length ? bikes.map(b => `
-                <div class="athlete-list-item">
-                    <div>
-                        <div class="name">${escapeHtml(b.name || '-')}</div>
-                        ${b.primary ? '<div class="meta">主用车</div>' : ''}
-                    </div>
-                    <div class="meta">${b.distance !== null && b.distance !== undefined ? formatDistance(b.distance) : '-'}</div>
-                </div>
-            `).join('') : '<div class="zone-empty" style="padding:12px 0;">暂无自行车数据</div>';
+            function buildGearSelectHtml(items, type, title) {
+                if (!items.length) {
+                    return `
+                        <div class="athlete-card">
+                            <div class="athlete-subsection-title">${title}</div>
+                            <div class="zone-empty" style="padding:12px 0;font-size:13px;">暂无${title}数据</div>
+                        </div>
+                    `;
+                }
+                const options = items.map((item, i) => {
+                    const name = escapeHtml(item.name || '-');
+                    const dist = item.distance !== null && item.distance !== undefined ? formatDistance(item.distance) : '-';
+                    const primaryTag = item.primary ? ' · 主用' : '';
+                    return `<option value="${i}">${name} (${dist})${primaryTag}</option>`;
+                }).join('');
 
-            const shoesHtml = shoes.length ? shoes.map(s => `
-                <div class="athlete-list-item">
-                    <div>
-                        <div class="name">${escapeHtml(s.name || '-')}</div>
-                        ${s.primary ? '<div class="meta">主用鞋</div>' : ''}
+                const details = items.map((item, i) => {
+                    const name = escapeHtml(item.name || '-');
+                    const dist = item.distance !== null && item.distance !== undefined ? formatDistance(item.distance) : '-';
+                    const id = escapeHtml(item.id || '-');
+                    const primary = item.primary ? '是' : '否';
+                    return `
+                        <div class="gear-detail ${i === 0 ? '' : 'hidden'}" id="${type}-detail-${i}">
+                            <div><strong>名称：</strong>${name}</div>
+                            <div><strong>累计里程：</strong>${dist}</div>
+                            <div><strong>装备 ID：</strong>${id}</div>
+                            <div><strong>主用：</strong>${primary}</div>
+                        </div>
+                    `;
+                }).join('');
+
+                return `
+                    <div class="athlete-card">
+                        <div class="athlete-subsection-title">${title}</div>
+                        <select class="gear-select" onchange="updateGearDetail(this, '${type}')">
+                            ${options}
+                        </select>
+                        ${details}
                     </div>
-                    <div class="meta">${s.distance !== null && s.distance !== undefined ? formatDistance(s.distance) : '-'}</div>
-                </div>
-            `).join('') : '<div class="zone-empty" style="padding:12px 0;">暂无跑鞋数据</div>';
+                `;
+            }
+
+            function buildCompactZoneCard(zone) {
+                const type = zone.type || 'heart_rate';
+                const title = type === 'power' ? '功率区间' : '心率区间';
+                const unit = type === 'power' ? 'W' : 'bpm';
+                const buckets = zone.distribution_buckets
+                    .map((b, i) => ({ ...b, index: i }))
+                    .filter(b => b.max !== null || b.min !== null);
+                if (!buckets.length) {
+                    return `<div class="zone-card"><h3>${title}</h3><div class="zone-empty" style="font-size:13px;">暂无数据</div></div>`;
+                }
+                const definedMaxes = buckets.map(b => b.max).filter(v => v !== null && v !== undefined && v !== -1);
+                const globalMax = definedMaxes.length ? Math.max(...definedMaxes) : Math.max(...buckets.map(b => (b.min || 0)));
+                const tail = Math.max(type === 'power' ? 50 : 10, Math.round(globalMax * 0.08));
+                const displayBuckets = buckets.map(b => {
+                    const min = b.min !== null && b.min !== undefined ? b.min : 0;
+                    const hasMax = b.max !== null && b.max !== undefined && b.max !== -1;
+                    const max = hasMax ? b.max : (globalMax + tail);
+                    return { ...b, min, max, hasMax };
+                });
+                const minBase = Math.min(...displayBuckets.map(b => b.min));
+                const totalRange = Math.max(...displayBuckets.map(b => b.max)) - minBase;
+                const effectiveTotal = totalRange > 0 ? totalRange : 1;
+                const segments = displayBuckets.map((b, i) => {
+                    const width = ((b.max - b.min) / effectiveTotal) * 100;
+                    const color = zoneColors[i % zoneColors.length];
+                    const rangeText = b.hasMax ? `${b.min}-${b.max}` : `${b.min}+`;
+                    const label = width > 8 ? (b.hasMax ? String(b.max) : '+') : '';
+                    const timeText = b.time ? ' · 时间 ' + formatTimeSeconds(b.time) : '';
+                    return `<div class="zone-segment" style="flex:${Math.max(width, 1)};background:${color};" title="Z${i + 1}: ${rangeText} ${unit}${timeText}"><span class="segment-label">${label}</span></div>`;
+                }).join('');
+                const legend = displayBuckets.map((b, i) => {
+                    const color = zoneColors[i % zoneColors.length];
+                    const rangeText = b.hasMax ? `${b.min}-${b.max}` : `${b.min}+`;
+                    const timeText = b.time ? formatTimeSeconds(b.time) : '-';
+                    return `
+                        <div class="zone-legend-item">
+                            <div class="zone-dot" style="background:${color}"></div>
+                            <span>Z${i + 1}: ${rangeText}</span>
+                            <span class="zone-time">${timeText}</span>
+                        </div>
+                    `;
+                }).join('');
+                const note = zone.source === 'estimated'
+                    ? `<span style="font-size:11px;color:#3182ce;font-weight:600;margin-left:6px;">估算</span>`
+                    : (zone.custom_zones
+                        ? '<span style="font-size:11px;color:#fc4c02;font-weight:600;margin-left:6px;">自定义</span>'
+                        : '<span style="font-size:11px;color:#888;font-weight:600;margin-left:6px;">默认</span>');
+                return `
+                    <div class="zone-card">
+                        <h3>${title}${note}</h3>
+                        <div class="zone-bar">${segments}</div>
+                        <div class="zone-legend">${legend}</div>
+                    </div>
+                `;
+            }
+
+            const bikesHtml = buildGearSelectHtml(bikes, 'bike', '自行车');
+            const shoesHtml = buildGearSelectHtml(shoes, 'shoe', '跑鞋');
+
+            let zones = [];
+            if (Array.isArray(zonesData)) zones = zonesData;
+            const hrZone = zones.find(z => z && z.type === 'heart_rate' && Array.isArray(z.distribution_buckets) && z.distribution_buckets.length > 0);
+            const hrCard = hrZone ? buildCompactZoneCard(hrZone) : `<div class="zone-card"><h3>心率区间</h3><div class="zone-empty" style="font-size:13px;">暂无数据</div></div>`;
 
             const gearHtml = `
-                <div class="athlete-subsection">
-                    <div class="athlete-grid-2">
-                        <div class="athlete-card">
-                            <div class="athlete-subsection-title">自行车</div>
-                            <div class="athlete-list">${bikesHtml}</div>
-                        </div>
-                        <div class="athlete-card">
-                            <div class="athlete-subsection-title">跑鞋</div>
-                            <div class="athlete-list">${shoesHtml}</div>
-                        </div>
-                    </div>
+                <div class="athlete-gear-row">
+                    ${bikesHtml}
+                    ${shoesHtml}
+                    ${hrCard}
                 </div>
             `;
+
+            const powerZones = zones.filter(z => z && z.type === 'power' && Array.isArray(z.distribution_buckets) && z.distribution_buckets.length > 0);
+            const extraZonesHtml = powerZones.length ? `
+                <div class="zones-panel" style="margin-top:18px;">
+                    ${powerZones.map(z => buildCompactZoneCard(z)).join('')}
+                </div>
+            ` : '';
 
             return `
                 <div class="athlete-section">
@@ -1017,9 +1152,17 @@
                     </div>
                     <div class="athlete-stats">${statsHtml}</div>
                     ${gearHtml}
-                    <div class="zones-panel">${buildZonesPanel(zonesData)}</div>
+                    ${extraZonesHtml}
                 </div>
             `;
+        }
+
+        function updateGearDetail(select, type) {
+            const parent = select.parentElement;
+            const details = parent.querySelectorAll('.gear-detail');
+            details.forEach(d => d.classList.add('hidden'));
+            const target = parent.querySelector('#' + type + '-detail-' + select.value);
+            if (target) target.classList.remove('hidden');
         }
 
         // --- 图表分析 ---
