@@ -687,6 +687,70 @@
             background: #e04400;
         }
 
+        /* 活动列表分页 */
+        .pagination-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 14px 0;
+            margin-top: 8px;
+        }
+
+        .pagination-info {
+            font-size: 13px;
+            color: #666;
+        }
+
+        .pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pagination-btn {
+            padding: 6px 12px;
+            border: 1px solid #d0d0d0;
+            border-radius: 6px;
+            background: #fff;
+            color: #333;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            border-color: #fc4c02;
+            color: #fc4c02;
+        }
+
+        .pagination-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .pagination-current {
+            font-size: 13px;
+            color: #333;
+            font-weight: 600;
+            padding: 0 8px;
+        }
+
+        .page-size-select {
+            padding: 6px 28px 6px 12px;
+            border: 1px solid #d0d0d0;
+            border-radius: 6px;
+            background: #fff;
+            font-size: 13px;
+            color: #333;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            cursor: pointer;
+        }
+
         /* 数据表格 */
         .data-table {
             width: 100%;
@@ -1249,6 +1313,12 @@
         let topElevationChartInstance = null;
         let topDistanceChartInstance = null;
         let analysisChartInstances = {};
+
+        // 活动列表分页状态
+        let allActivities = [];
+        let activityPage = 1;
+        let activityPageSize = 20;
+        let lastAnalyzedActivityId = null;
 
         function buildChartControls() {
             return `
@@ -2369,11 +2439,19 @@
 
         function backToActivityList() {
             const btn = document.querySelector('.menu-item[onclick*="loadActivities"]');
-            if (btn) loadActivities(btn);
+            if (!btn) return;
+            if (lastAnalyzedActivityId && allActivities.length) {
+                const idx = allActivities.findIndex(a => String(a.id) === String(lastAnalyzedActivityId));
+                if (idx >= 0) {
+                    activityPage = Math.floor(idx / activityPageSize) + 1;
+                }
+            }
+            loadActivities(btn, true);
         }
 
         async function analyzeActivity(activityId) {
             setLoading('活动分析');
+            lastAnalyzedActivityId = activityId;
 
             try {
                 const [activityRes, streamsRes] = await Promise.all([
@@ -2386,20 +2464,35 @@
 
                 if (!streamsRes.ok) {
                     const errorMsg = streamsData && streamsData.error ? streamsData.error : '未知错误';
-                    setError('活动分析', '获取流数据失败: ' + errorMsg);
+                    setHtml('活动分析', `
+                        <div style="color:#c00;padding:20px 0;text-align:center;">
+                            <div style="margin-bottom:16px;">获取流数据失败：${escapeHtml(errorMsg)}</div>
+                            <button class="btn-primary" onclick="backToActivityList()">返回列表</button>
+                        </div>
+                    `);
                     return;
                 }
 
                 const activity = activities.find(a => String(a.id) === String(activityId));
                 if (!activity) {
-                    setError('活动分析', '未找到对应活动');
+                    setHtml('活动分析', `
+                        <div style="color:#c00;padding:20px 0;text-align:center;">
+                            <div style="margin-bottom:16px;">未找到对应活动</div>
+                            <button class="btn-primary" onclick="backToActivityList()">返回列表</button>
+                        </div>
+                    `);
                     return;
                 }
 
                 setHtml('活动分析', buildAnalysisPanel(activity, streamsData));
                 renderAnalysisCharts(streamsData);
             } catch (err) {
-                setError('活动分析', '请求出错: ' + err.message);
+                setHtml('活动分析', `
+                    <div style="color:#c00;padding:20px 0;text-align:center;">
+                        <div style="margin-bottom:16px;">请求出错：${escapeHtml(err.message)}</div>
+                        <button class="btn-primary" onclick="backToActivityList()">返回列表</button>
+                    </div>
+                `);
             }
         }
 
@@ -2451,7 +2544,7 @@
 
         function buildActivityTable(activities) {
             const rows = activities.map(a => `
-                <tr>
+                <tr data-activity-id="${a.id}">
                     <td>${escapeHtml(a.id)}</td>
                     <td>${escapeHtml(a.name)}</td>
                     <td>${escapeHtml(a.type)}</td>
@@ -2502,7 +2595,74 @@
             `;
         }
 
-        async function loadActivities(btn) {
+        function buildPaginationControls(total) {
+            const totalPages = Math.max(1, Math.ceil(total / activityPageSize));
+            const start = (activityPage - 1) * activityPageSize + 1;
+            const end = Math.min(activityPage * activityPageSize, total);
+            return `
+                <div class="pagination-bar">
+                    <div class="pagination-info">
+                        共 ${total} 条，第 ${start}-${end} 条，第 ${activityPage}/${totalPages} 页
+                    </div>
+                    <div class="pagination-controls">
+                        <select class="page-size-select" id="page-size" onchange="changePageSize(this.value)">
+                            <option value="20" ${activityPageSize === 20 ? 'selected' : ''}>每页 20 条</option>
+                            <option value="40" ${activityPageSize === 40 ? 'selected' : ''}>每页 40 条</option>
+                            <option value="100" ${activityPageSize === 100 ? 'selected' : ''}>每页 100 条</option>
+                            <option value="200" ${activityPageSize === 200 ? 'selected' : ''}>每页 200 条</option>
+                        </select>
+                        <button class="pagination-btn" onclick="goToPage(1)" ${activityPage === 1 ? 'disabled' : ''}>首页</button>
+                        <button class="pagination-btn" onclick="goToPage(${activityPage - 1})" ${activityPage === 1 ? 'disabled' : ''}>上一页</button>
+                        <span class="pagination-current">${activityPage} / ${totalPages}</span>
+                        <button class="pagination-btn" onclick="goToPage(${activityPage + 1})" ${activityPage === totalPages ? 'disabled' : ''}>下一页</button>
+                        <button class="pagination-btn" onclick="goToPage(${totalPages})" ${activityPage === totalPages ? 'disabled' : ''}>末页</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderActivityPage(shouldRestoreScroll = false) {
+            const total = allActivities.length;
+            const totalPages = Math.max(1, Math.ceil(total / activityPageSize));
+            if (activityPage > totalPages) activityPage = totalPages;
+            if (activityPage < 1) activityPage = 1;
+
+            const start = (activityPage - 1) * activityPageSize;
+            const end = start + activityPageSize;
+            const pageActivities = allActivities.slice(start, end);
+
+            const tableHtml = buildScrollableTable(buildActivityTable(pageActivities));
+            const paginationHtml = buildPaginationControls(total);
+            setHtml('活动列表', tableHtml + paginationHtml);
+            initTableScrollSync();
+
+            if (shouldRestoreScroll && lastAnalyzedActivityId) {
+                requestAnimationFrame(() => {
+                    const row = resultEl.querySelector(`tr[data-activity-id="${lastAnalyzedActivityId}"]`);
+                    if (row) {
+                        const tableScroll = resultEl.querySelector('.table-scroll');
+                        if (tableScroll) {
+                            row.scrollIntoView({ behavior: 'auto', block: 'center' });
+                        }
+                    }
+                });
+            }
+        }
+
+        function changePageSize(size) {
+            activityPageSize = parseInt(size, 10);
+            activityPage = 1;
+            renderActivityPage(true);
+        }
+
+        function goToPage(page) {
+            const totalPages = Math.max(1, Math.ceil(allActivities.length / activityPageSize));
+            if (page < 1 || page > totalPages || page === activityPage) return;
+            activityPage = page;
+            renderActivityPage(false);
+        }
+
+        async function loadActivities(btn, restoreScroll = false) {
             setActiveMenu(btn);
             setLoading('活动列表（正在同步，请稍候）...');
 
@@ -2521,9 +2681,8 @@
                     return;
                 }
 
-                setHtml('活动列表', buildScrollableTable(buildActivityTable(data)));
-                // 初始化并同步滚动条
-                initTableScrollSync();
+                allActivities = data;
+                renderActivityPage(restoreScroll);
             } catch (err) {
                 setError('活动列表', '请求出错: ' + err.message);
             }
