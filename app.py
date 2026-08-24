@@ -1301,6 +1301,348 @@ def chart_years():
     return jsonify({'years': sorted_years})
 
 
+# ============== 赛段（Segment）分析 ==============
+
+SEGMENTS_CACHE_DIR = "segments_cache"
+SEGMENTS_CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 小时
+
+
+def _ensure_segments_cache_dir():
+    """确保赛段缓存目录存在。"""
+    os.makedirs(SEGMENTS_CACHE_DIR, exist_ok=True)
+
+
+def _segments_cache_path(name):
+    """返回赛段缓存文件路径。"""
+    return os.path.join(SEGMENTS_CACHE_DIR, f"{name}.json")
+
+
+def _load_segments_cache(name):
+    """加载赛段缓存。"""
+    path = _segments_cache_path(name)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+        if not isinstance(cache, dict):
+            return None
+        cached_at = cache.get("cached_at")
+        if not cached_at or time.time() - cached_at > SEGMENTS_CACHE_TTL_SECONDS:
+            return None
+        if cache.get("token_fp") != _token_fingerprint():
+            return None
+        return cache.get("data")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def _save_segments_cache(name, data):
+    """保存赛段缓存。"""
+    _ensure_segments_cache_dir()
+    path = _segments_cache_path(name)
+    cache = {
+        "token_fp": _token_fingerprint(),
+        "cached_at": time.time(),
+        "data": data,
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+
+def _strava_get(url, params=None, timeout=30):
+    """使用当前 access_token 向 Strava API 发送 GET 请求。"""
+    token = session_state.get("access_token")
+    if not token:
+        raise RuntimeError("未授权")
+    response = requests.get(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        params=params,
+        timeout=timeout,
+    )
+    return response
+
+
+def _safe_number(value):
+    """安全地把值转成 float，失败返回 None。"""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_iso_local(iso_string):
+    """把 ISO 时间串转为本地可读字符串。"""
+    if not iso_string:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso_string.replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return iso_string
+
+
+def _extract_year_month(iso_string):
+    """从 ISO 时间串提取年月，用于季节性聚合。"""
+    if not iso_string:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso_string.replace("Z", "+00:00"))
+        return (dt.year, dt.month)
+    except Exception:
+        return None
+
+
+def _summarize_segment_effort(item):
+    """从 DetailedSegmentEffort/SummarySegmentEffort JSON 提取前端需要的关键字段。"""
+    segment = item.get("segment") or {}
+    return {
+        "effort_id": item.get("id"),
+        "segment_id": segment.get("id"),
+        "name": segment.get("name") or item.get("name") or "未命名赛段",
+        "activity_id": (item.get("activity") or {}).get("id"),
+        "start_date": item.get("start_date"),
+        "start_date_local": item.get("start_date_local"),
+        "elapsed_time": _safe_number(item.get("elapsed_time")),
+        "moving_time": _safe_number(item.get("moving_time")),
+        "average_watts": _safe_number(item.get("average_watts")),
+        "device_watts": bool(item.get("device_watts")) if item.get("device_watts") is not None else None,
+        "distance": _safe_number(segment.get("distance")),
+        "average_grade": _safe_number(segment.get("average_grade")),
+        "maximum_grade": _safe_number(segment.get("maximum_grade")),
+        "elevation_high": _safe_number(segment.get("elevation_high")),
+        "elevation_low": _safe_number(segment.get("elevation_low")),
+        "start_latlng": segment.get("start_latlng"),
+        "end_latlng": segment.get("end_latlng"),
+        "city": segment.get("city"),
+        "state": segment.get("state"),
+        "country": segment.get("country"),
+        "climb_category": segment.get("climb_category"),
+        "activity_type": segment.get("activity_type") or segment.get("type"),
+    }
+
+
+def _compute_segment_deep_metrics(effort, athlete_weight_kg=None):
+    """计算单次 effort 的深度指标：VAM、W/kg、效率比等。"""
+    elapsed_time = _safe_number(effort.get("elapsed_time")) or 0
+    moving_time = _safe_number(effort.get("moving_time")) or 0
+    avg_watts = _safe_number(effort.get("average_watts"))
+    elevation_high = _safe_number(effort.get("elevation_high")) or 0
+    elevation_low = _safe_number(effort.get("elevation_low")) or 0
+    segment_distance = _safe_number(effort.get("distance")) or 0
+
+    weight = athlete_weight_kg or 70.0
+
+    vam = None
+    if moving_time > 0 and elevation_high > elevation_low:
+        vam = round((elevation_high - elevation_low) / moving_time * 3600, 1)
+
+    wkg = None
+    if avg_watts and weight > 0:
+        wkg = round(avg_watts / weight, 2)
+
+    efficiency = None
+    if elapsed_time > 0:
+        efficiency = round(moving_time / elapsed_time, 3)
+
+    # 估算功率体重比的理论参考：根据坡度粗略估算
+    estimated_wkg = None
+    if segment_distance > 0 and moving_time > 0 and avg_watts:
+        gradient = (elevation_high - elevation_low) / segment_distance if segment_distance else 0
+        # 简单估算：平路约 2.5 W/kg，每 1% 坡度约增加 0.15 W/kg（速度假设）
+        estimated_wkg = round(2.5 + max(0, gradient) * 0.15, 2)
+
+    return {
+        "vam": vam,
+        "wkg": wkg,
+        "estimated_wkg": estimated_wkg,
+        "efficiency": efficiency,
+        "athlete_weight_used": weight,
+    }
+
+
+@app.route("/activities/<int:activity_id>/segments")
+def get_activity_segments(activity_id):
+    """获取某活动中包含的赛段 effort 摘要列表。"""
+    import traceback
+
+    if not session_state.get("client"):
+        return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
+
+    cached = _load_segments_cache(f"activity_{activity_id}_segments")
+    if cached is not None:
+        return jsonify(cached)
+
+    try:
+        url = f"https://www.strava.com/api/v3/activities/{activity_id}"
+        response = _strava_get(url, timeout=30)
+        print(f"[/activities/{activity_id}/segments] Strava API status={response.status_code}")
+        response.raise_for_status()
+        activity = response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"[/activities/{activity_id}/segments] 调用失败: {e}")
+        traceback.print_exc()
+        return jsonify({"error": f"调用 Strava 失败: {e}"}), 500
+
+    segment_efforts = activity.get("segment_efforts") or []
+    result = [_summarize_segment_effort(e) for e in segment_efforts]
+    result.sort(key=lambda x: x.get("start_date") or "")
+
+    _save_segments_cache(f"activity_{activity_id}_segments", result)
+    return jsonify(result)
+
+
+@app.route("/segments/<int:segment_id>/efforts")
+def get_segment_efforts(segment_id):
+    """获取某赛段下当前运动员的历史 effort 列表，用于趋势分析。
+
+    Strava 此接口需要 subscription，调用失败会返回明确错误。
+    """
+    import traceback
+
+    if not session_state.get("client"):
+        return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
+
+    cached = _load_segments_cache(f"segment_{segment_id}_efforts")
+    if cached is not None:
+        return jsonify(cached)
+
+    try:
+        url = "https://www.strava.com/api/v3/segment_efforts"
+        response = _strava_get(
+            url,
+            params={"segment_id": segment_id, "per_page": 200},
+            timeout=60,
+        )
+        print(f"[/segments/{segment_id}/efforts] Strava API status={response.status_code}")
+        response.raise_for_status()
+        efforts = response.json()
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if hasattr(e, "response") else None
+        detail = e.response.text[:200] if hasattr(e, "response") else str(e)
+        print(f"[/segments/{segment_id}/efforts] HTTP 错误: {status}, {detail}")
+        if status == 402:
+            return jsonify({"error": "Strava 订阅（Subscription）权限不足，无法获取赛段历史 effort。"}), 402
+        if status == 403:
+            return jsonify({"error": "没有权限查看该赛段的历史 effort。"}), 403
+        return jsonify({"error": f"调用 Strava 失败: {e}"}), 500
+    except requests.exceptions.RequestException as e:
+        print(f"[/segments/{segment_id}/efforts] 调用失败: {e}")
+        traceback.print_exc()
+        return jsonify({"error": f"调用 Strava 失败: {e}"}), 500
+
+    summarized = [_summarize_segment_effort(e) for e in efforts]
+    summarized.sort(key=lambda x: x.get("start_date") or "")
+
+    # 季节性聚合：按年份、年份-月份统计平均用时/功率
+    by_year = {}
+    by_year_month = {}
+    for e in summarized:
+        ym = _extract_year_month(e.get("start_date_local") or e.get("start_date"))
+        if not ym:
+            continue
+        y, m = ym
+        key_y = str(y)
+        key_ym = f"{y}-{m:02d}"
+        by_year.setdefault(key_y, []).append(e)
+        by_year_month.setdefault(key_ym, []).append(e)
+
+    def _agg(items):
+        times = [i["elapsed_time"] for i in items if i.get("elapsed_time")]
+        watts = [i["average_watts"] for i in items if i.get("average_watts")]
+        return {
+            "count": len(items),
+            "avg_elapsed_time": round(sum(times) / len(times), 1) if times else None,
+            "avg_moving_time": round(sum(i["moving_time"] for i in items if i.get("moving_time")) / len([i for i in items if i.get("moving_time")]), 1) if any(i.get("moving_time") for i in items) else None,
+            "avg_watts": round(sum(watts) / len(watts), 1) if watts else None,
+        }
+
+    result = {
+        "segment_id": segment_id,
+        "efforts": summarized,
+        "by_year": {k: _agg(v) for k, v in sorted(by_year.items())},
+        "by_year_month": {k: _agg(v) for k, v in sorted(by_year_month.items())},
+    }
+
+    _save_segments_cache(f"segment_{segment_id}_efforts", result)
+    return jsonify(result)
+
+
+@app.route("/segment_efforts/<int:effort_id>")
+def get_segment_effort_detail(effort_id):
+    """获取单次 effort 详情，并计算 VAM、W/kg、效率比等深度指标。
+
+    Strava 此接口需要 subscription，调用失败会返回明确错误。
+    """
+    import traceback
+
+    if not session_state.get("client"):
+        return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
+
+    cached = _load_segments_cache(f"effort_{effort_id}")
+    if cached is not None:
+        return jsonify(cached)
+
+    try:
+        url = f"https://www.strava.com/api/v3/segment_efforts/{effort_id}"
+        response = _strava_get(url, timeout=30)
+        print(f"[/segment_efforts/{effort_id}] Strava API status={response.status_code}")
+        response.raise_for_status()
+        effort = response.json()
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if hasattr(e, "response") else None
+        detail = e.response.text[:200] if hasattr(e, "response") else str(e)
+        print(f"[/segment_efforts/{effort_id}] HTTP 错误: {status}, {detail}")
+        if status == 402:
+            return jsonify({"error": "Strava 订阅（Subscription）权限不足，无法获取赛段 effort 详情。"}), 402
+        if status == 403:
+            return jsonify({"error": "没有权限查看该赛段 effort 详情。"}), 403
+        return jsonify({"error": f"调用 Strava 失败: {e}"}), 500
+    except requests.exceptions.RequestException as e:
+        print(f"[/segment_efforts/{effort_id}] 调用失败: {e}")
+        traceback.print_exc()
+        return jsonify({"error": f"调用 Strava 失败: {e}"}), 500
+
+    summary = _summarize_segment_effort(effort)
+
+    # 获取运动员体重用于 W/kg 计算
+    athlete_weight = None
+    try:
+        athlete = get_cached_athlete()
+        if athlete:
+            athlete_weight = _safe_number(athlete.get("weight"))
+    except Exception:
+        athlete_weight = None
+
+    metrics = _compute_segment_deep_metrics(summary, athlete_weight)
+
+    # PR 信息
+    athlete_segment_stats = effort.get("athlete_segment_stats") or {}
+    pr_info = {
+        "pr_elapsed_time": _safe_number(athlete_segment_stats.get("pr_elapsed_time")),
+        "pr_date": athlete_segment_stats.get("pr_date"),
+        "effort_count": _safe_number(athlete_segment_stats.get("effort_count")),
+    }
+
+    # 与 PR 的差距
+    pr_gap = None
+    if summary.get("elapsed_time") and pr_info.get("pr_elapsed_time"):
+        pr_gap = round(summary["elapsed_time"] - pr_info["pr_elapsed_time"], 1)
+
+    result = {
+        "effort_id": effort_id,
+        "summary": summary,
+        "metrics": metrics,
+        "pr": pr_info,
+        "pr_gap_seconds": pr_gap,
+        "raw": effort,
+    }
+
+    _save_segments_cache(f"effort_{effort_id}", result)
+    return jsonify(result)
+
+
 def auto_sync_loop():
     """后台线程：每隔 AUTO_SYNC_INTERVAL_SECONDS 执行一次增量同步。"""
     while True:
