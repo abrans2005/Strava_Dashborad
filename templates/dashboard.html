@@ -779,6 +779,16 @@
             background: #fafafa;
         }
 
+        .data-table tbody tr.analyzing {
+            background: #fff7ed;
+            box-shadow: inset 0 0 0 2px #fc4c02;
+        }
+
+        .data-table tbody tr.analyzing td {
+            color: #c23a00;
+            font-weight: 600;
+        }
+
         .data-table td {
             color: #444;
         }
@@ -2544,7 +2554,7 @@
 
         function buildActivityTable(activities) {
             const rows = activities.map(a => `
-                <tr data-activity-id="${a.id}">
+                <tr data-activity-id="${a.id}" class="${String(a.id) === String(lastAnalyzedActivityId) ? 'analyzing' : ''}">
                     <td>${escapeHtml(a.id)}</td>
                     <td>${escapeHtml(a.name)}</td>
                     <td>${escapeHtml(a.type)}</td>
