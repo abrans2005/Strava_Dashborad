@@ -1397,11 +1397,15 @@ def _extract_year_month(iso_string):
 def _summarize_segment_effort(item):
     """从 DetailedSegmentEffort/SummarySegmentEffort JSON 提取前端需要的关键字段。"""
     segment = item.get("segment") or {}
+    # Strava 的 segment/effort ID 是 64 位整数，前端 JS Number 会丢失精度，所以统一转成字符串。
+    def _str_id(value):
+        return str(value) if value is not None else None
+
     return {
-        "effort_id": item.get("id"),
-        "segment_id": segment.get("id"),
+        "effort_id": _str_id(item.get("id")),
+        "segment_id": _str_id(segment.get("id")),
         "name": segment.get("name") or item.get("name") or "未命名赛段",
-        "activity_id": (item.get("activity") or {}).get("id"),
+        "activity_id": _str_id((item.get("activity") or {}).get("id")),
         "start_date": item.get("start_date"),
         "start_date_local": item.get("start_date_local"),
         "elapsed_time": _safe_number(item.get("elapsed_time")),
@@ -1559,7 +1563,7 @@ def get_segment_efforts(segment_id):
         }
 
     result = {
-        "segment_id": segment_id,
+        "segment_id": str(segment_id),
         "efforts": summarized,
         "by_year": {k: _agg(v) for k, v in sorted(by_year.items())},
         "by_year_month": {k: _agg(v) for k, v in sorted(by_year_month.items())},
@@ -1631,7 +1635,7 @@ def get_segment_effort_detail(effort_id):
         pr_gap = round(summary["elapsed_time"] - pr_info["pr_elapsed_time"], 1)
 
     result = {
-        "effort_id": effort_id,
+        "effort_id": str(effort_id),
         "summary": summary,
         "metrics": metrics,
         "pr": pr_info,

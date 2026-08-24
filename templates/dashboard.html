@@ -2591,7 +2591,7 @@
                     </div>
                 </div>
                 <div style="text-align:center;margin-top:24px;">
-                    <button class="btn-primary" onclick="analyzeSegments(${activity.id}, '${escapeHtml(activity.name).replace(/'/g, "\\'")}')">赛段分析</button>
+                    <button class="btn-primary" onclick="analyzeSegments('${activity.id}', '${escapeHtml(activity.name).replace(/'/g, "\\'")}')">赛段分析</button>
                     <button class="btn-back" onclick="backToActivityList()">返回列表</button>
                 </div>
             `;
@@ -2709,7 +2709,7 @@
             if (!segments || segments.length === 0) {
                 setHtml(title, `
                     <div class="segment-back">
-                        <button class="btn-back" onclick="analyzeActivity(${currentSegmentActivityId})">返回活动分析</button>
+                        <button class="btn-back" onclick="analyzeActivity('${currentSegmentActivityId || ''}')">返回活动分析</button>
                     </div>
                     <div style="padding:40px 0;text-align:center;color:#888;">该活动没有记录赛段。</div>
                 `);
@@ -2717,7 +2717,7 @@
             }
 
             const cards = segments.map(s => `
-                <div class="segment-card" onclick="loadSegmentHistory(${s.segment_id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">
+                <div class="segment-card" onclick="loadSegmentHistory('${s.segment_id}', '${escapeHtml(s.name).replace(/'/g, "\\'")}')">
                     <div class="name">${escapeHtml(s.name)}</div>
                     <div class="meta">
                         <span>📏 ${formatDistance(s.distance)}</span>
@@ -2730,7 +2730,7 @@
 
             setHtml(title, `
                 <div class="segment-back">
-                    <button class="btn-back" onclick="analyzeActivity(${currentSegmentActivityId})">返回活动分析</button>
+                    <button class="btn-back" onclick="analyzeActivity('${currentSegmentActivityId || ''}')">返回活动分析</button>
                 </div>
                 <div class="segment-grid">${cards}</div>
             `);
@@ -2746,7 +2746,7 @@
                 if (!res.ok) {
                     setHtml('赛段历史趋势', `
                         <div class="segment-back">
-                            <button class="btn-back" onclick="analyzeSegments(${currentSegmentActivityId}, '')">返回赛段列表</button>
+                            <button class="btn-back" onclick="analyzeSegments('${currentSegmentActivityId || ''}', '')">返回赛段列表</button>
                         </div>
                         <div style="color:#c00;padding:20px 0;text-align:center;">
                             ${escapeHtml(data.error || '获取失败')}
@@ -2759,7 +2759,7 @@
             } catch (err) {
                 setHtml('赛段历史趋势', `
                     <div class="segment-back">
-                        <button class="btn-back" onclick="analyzeSegments(${currentSegmentActivityId}, '')">返回赛段列表</button>
+                        <button class="btn-back" onclick="analyzeSegments('${currentSegmentActivityId || ''}', '')">返回赛段列表</button>
                     </div>
                     <div style="color:#c00;padding:20px 0;text-align:center;">
                         请求出错：${escapeHtml(err.message)}
@@ -2775,7 +2775,7 @@
             if (!efforts.length) {
                 setHtml(title, `
                     <div class="segment-back">
-                        <button class="btn-back" onclick="analyzeSegments(${currentSegmentActivityId}, '')">返回赛段列表</button>
+                        <button class="btn-back" onclick="analyzeSegments('${currentSegmentActivityId || ''}', '')">返回赛段列表</button>
                     </div>
                     <div style="padding:40px 0;text-align:center;color:#888;">暂无该赛段的历史数据。</div>
                 `);
@@ -2799,7 +2799,7 @@
 
             // 单次 effort 列表
             const effortRows = efforts.slice().reverse().map(e => `
-                <div class="effort-row" onclick="analyzeSegmentEffort(${e.effort_id}, '${escapeHtml(segmentName).replace(/'/g, "\\'")}', ${e.segment_id})">
+                <div class="effort-row" onclick="analyzeSegmentEffort('${e.effort_id}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}', '${e.segment_id}')">
                     <div class="date">${formatDate(e.start_date)}</div>
                     <div class="stats">
                         <span>⏱️ ${formatTime(e.elapsed_time)}</span>
@@ -2837,7 +2837,7 @@
 
             setHtml(title, `
                 <div class="segment-back">
-                    <button class="btn-back" onclick="analyzeSegments(${currentSegmentActivityId}, '')">返回赛段列表</button>
+                    <button class="btn-back" onclick="analyzeSegments('${currentSegmentActivityId || ''}', '')">返回赛段列表</button>
                 </div>
                 ${prHtml}
                 <div class="analysis-grid">
@@ -2866,7 +2866,7 @@
                 </div>
                 ${seasonalTable}
                 <div style="text-align:center;margin-top:20px;">
-                    <button class="btn-back" onclick="analyzeSegments(${currentSegmentActivityId}, '')">返回赛段列表</button>
+                    <button class="btn-back" onclick="analyzeSegments('${currentSegmentActivityId || ''}', '')">返回赛段列表</button>
                 </div>
             `);
 
@@ -3024,7 +3024,7 @@
                 if (!res.ok) {
                     setHtml('赛段单次分析', `
                         <div class="segment-back">
-                            <button class="btn-back" onclick="loadSegmentHistory(${segmentId || ''}, '${escapeHtml(segmentName).replace(/'/g, "\\'")}')">返回赛段趋势</button>
+                            <button class="btn-back" onclick="loadSegmentHistory('${segmentId || ''}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}')">返回赛段趋势</button>
                         </div>
                         <div style="color:#c00;padding:20px 0;text-align:center;">
                             ${escapeHtml(data.error || '获取失败')}
@@ -3037,7 +3037,7 @@
             } catch (err) {
                 setHtml('赛段单次分析', `
                     <div class="segment-back">
-                        <button class="btn-back" onclick="analyzeSegments(${currentSegmentActivityId || ''}, '')">返回赛段列表</button>
+                        <button class="btn-back" onclick="analyzeSegments('${currentSegmentActivityId || ''}', '')">返回赛段列表</button>
                     </div>
                     <div style="color:#c00;padding:20px 0;text-align:center;">
                         请求出错：${escapeHtml(err.message)}
@@ -3105,7 +3105,7 @@
 
             setHtml(title, `
                 <div class="segment-back">
-                    <button class="btn-back" onclick="loadSegmentHistory(${sid}, '${escapeHtml(segmentName).replace(/'/g, "\\'")}')">返回赛段趋势</button>
+                    <button class="btn-back" onclick="loadSegmentHistory('${sid}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}')">返回赛段趋势</button>
                 </div>
                 <div class="metric-highlight">${cardsHtml}</div>
                 <div class="analysis-grid">
@@ -3124,7 +3124,7 @@
                 ${prHtml}
                 ${geoHtml}
                 <div style="text-align:center;margin-top:20px;">
-                    <button class="btn-back" onclick="loadSegmentHistory(${sid}, '${escapeHtml(segmentName).replace(/'/g, "\\'")}')">返回赛段趋势</button>
+                    <button class="btn-back" onclick="loadSegmentHistory('${sid}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}')">返回赛段趋势</button>
                 </div>
             `);
 
