@@ -2,6 +2,11 @@ import os
 import webbrowser
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# stravalib 在 Client() 缺少 STRAVA_CLIENT_ID/SECRET 环境变量时会打印 token 刷新警告；
+# 本脚本自己用 code 换 token，无需 stravalib 自动刷新，直接静音该警告。
+os.environ.setdefault("SILENCE_TOKEN_WARNINGS", "true")
+
 from stravalib import Client
 
 # 配置参数

@@ -8,6 +8,11 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 from flask import Flask, render_template, request, jsonify, redirect
+
+# stravalib 在 Client() 缺少 STRAVA_CLIENT_ID/SECRET 环境变量时会打印 token 刷新警告；
+# 本项目自己管理授权流程（见 /authorization），无需 stravalib 自动刷新，直接静音该警告。
+os.environ.setdefault("SILENCE_TOKEN_WARNINGS", "true")
+
 from stravalib import Client
 
 app = Flask(__name__)
@@ -1644,6 +1649,185 @@ def get_segment_effort_detail(effort_id):
     }
 
     _save_segments_cache(f"effort_{effort_id}", result)
+    return jsonify(result)
+
+
+# ============== 训练负荷与状态 ==============
+
+def _activity_local_date(activity):
+    """按本地时区取得活动日期，用于训练日历聚合。"""
+    value = activity.get("start_date")
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return dt.astimezone().date() if dt.tzinfo else dt.date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _calculate_activity_load(activity, ftp):
+    """优先计算功率 TSS，无功率时回退到 Strava 强度评分。"""
+    moving_time = _safe_number(activity.get("moving_time")) or 0
+    normalized_power = _safe_number(activity.get("weighted_average_watts"))
+    suffer_score = _safe_number(activity.get("suffer_score"))
+    intensity_factor = None
+    load = None
+    method = "unavailable"
+
+    if ftp and normalized_power and normalized_power > 0 and moving_time > 0:
+        intensity_factor = normalized_power / ftp
+        load = moving_time * normalized_power * intensity_factor / (ftp * 3600) * 100
+        method = "power_tss"
+    elif suffer_score is not None and suffer_score >= 0:
+        load = suffer_score
+        method = "suffer_score"
+
+    return {
+        "id": str(activity.get("id")) if activity.get("id") is not None else None,
+        "name": activity.get("name") or "未命名活动",
+        "type": activity.get("sport_type") or activity.get("type"),
+        "start_date": activity.get("start_date"),
+        "date": _activity_local_date(activity),
+        "moving_time": moving_time or None,
+        "normalized_power": normalized_power,
+        "intensity_factor": round(intensity_factor, 3) if intensity_factor is not None else None,
+        "load": round(load, 1) if load is not None else None,
+        "load_method": method,
+    }
+
+
+def _training_form_status(tsb):
+    """将 TSB 转换为可展示的训练状态。"""
+    if tsb >= 15:
+        return {"key": "fresh", "label": "恢复充分", "description": "身体状态较为新鲜，可结合训练计划安排高质量训练。"}
+    if tsb >= 5:
+        return {"key": "ready", "label": "状态良好", "description": "疲劳较低，适合维持正常训练节奏。"}
+    if tsb >= -10:
+        return {"key": "balanced", "label": "负荷平衡", "description": "训练刺激与恢复相对平衡，注意观察身体反馈。"}
+    if tsb >= -25:
+        return {"key": "fatigued", "label": "疲劳累积", "description": "近期负荷较高，建议关注睡眠与恢复。"}
+    return {"key": "strained", "label": "高负荷状态", "description": "短期负荷明显高于长期水平，建议优先恢复并谨慎安排强度。"}
+
+
+def _build_training_load(activities, ftp, days, today):
+    """聚合训练负荷，并用展示区间之前的历史预热 ATL/CTL。"""
+    details = []
+    for activity in activities:
+        detail = _calculate_activity_load(activity, ftp)
+        if detail["date"] is None or detail["date"] > today:
+            continue
+        details.append(detail)
+
+    details.sort(key=lambda item: item.get("start_date") or "", reverse=True)
+    range_start = today - timedelta(days=days - 1)
+    visible_details = [item for item in details if item["date"] >= range_start]
+
+    daily_loads = {}
+    daily_counts = {}
+    for item in details:
+        day = item["date"]
+        daily_counts[day] = daily_counts.get(day, 0) + 1
+        if item["load"] is not None:
+            daily_loads[day] = daily_loads.get(day, 0) + item["load"]
+
+    first_day = min(daily_loads) if daily_loads else today
+    atl = 0.0
+    ctl = 0.0
+    form_by_day = {}
+    for offset in range((today - first_day).days + 1):
+        day = first_day + timedelta(days=offset)
+        load = daily_loads.get(day, 0)
+        atl += (load - atl) / 7
+        ctl += (load - ctl) / 42
+        form_by_day[day] = {"atl": atl, "ctl": ctl, "tsb": ctl - atl}
+
+    daily = []
+    for offset in range(days):
+        day = range_start + timedelta(days=offset)
+        form = form_by_day.get(day, {"atl": 0, "ctl": 0, "tsb": 0})
+        daily.append({
+            "date": day.isoformat(),
+            "load": round(daily_loads.get(day, 0), 1),
+            "activity_count": daily_counts.get(day, 0),
+            "atl": round(form["atl"], 1),
+            "ctl": round(form["ctl"], 1),
+            "tsb": round(form["tsb"], 1),
+        })
+
+    current_form = form_by_day.get(today, {"atl": 0, "ctl": 0, "tsb": 0})
+    current_week_start = today - timedelta(days=6)
+    previous_week_start = today - timedelta(days=13)
+    current_week_load = sum(daily_loads.get(current_week_start + timedelta(days=i), 0) for i in range(7))
+    previous_week_load = sum(daily_loads.get(previous_week_start + timedelta(days=i), 0) for i in range(7))
+    week_change_pct = None
+    if previous_week_load > 0:
+        week_change_pct = round((current_week_load - previous_week_load) / previous_week_load * 100, 1)
+    elif current_week_load == 0:
+        week_change_pct = 0.0
+
+    current_monday = today - timedelta(days=today.weekday())
+    first_monday = current_monday - timedelta(weeks=11)
+    weekly = []
+    for week_index in range(12):
+        week_start = first_monday + timedelta(weeks=week_index)
+        load = sum(daily_loads.get(week_start + timedelta(days=i), 0) for i in range(7))
+        weekly.append({
+            "week_start": week_start.isoformat(),
+            "label": week_start.strftime("%m/%d"),
+            "load": round(load, 1),
+        })
+
+    source_counts = {
+        "power_tss": sum(item["load_method"] == "power_tss" for item in visible_details),
+        "suffer_score": sum(item["load_method"] == "suffer_score" for item in visible_details),
+        "unavailable": sum(item["load_method"] == "unavailable" for item in visible_details),
+    }
+    total_load = sum(item["load"] or 0 for item in visible_details)
+    status = _training_form_status(current_form["tsb"])
+
+    return {
+        "range": {"days": days, "start": range_start.isoformat(), "end": today.isoformat()},
+        "summary": {
+            "ftp": round(ftp, 1) if ftp else None,
+            "atl": round(current_form["atl"], 1),
+            "ctl": round(current_form["ctl"], 1),
+            "tsb": round(current_form["tsb"], 1),
+            "status": status,
+            "current_week_load": round(current_week_load, 1),
+            "previous_week_load": round(previous_week_load, 1),
+            "week_change_pct": week_change_pct,
+            "activity_count": len(visible_details),
+            "total_load": round(total_load, 1),
+            "source_counts": source_counts,
+        },
+        "daily": daily,
+        "weekly": weekly,
+        "activities": visible_details[:15],
+    }
+
+
+@app.route("/training-load")
+def get_training_load():
+    """返回训练负荷、短期/长期负荷趋势及当前训练状态。"""
+    days = request.args.get("days", default=90, type=int)
+    if days not in {30, 90, 180, 365}:
+        return jsonify({"error": "days 仅支持 30、90、180、365"}), 400
+
+    ftp = None
+    if "ftp" in request.args:
+        ftp = request.args.get("ftp", type=float)
+        if ftp is None or not math.isfinite(ftp) or ftp <= 0:
+            return jsonify({"error": "FTP 必须是大于 0 的数值"}), 400
+    else:
+        athlete = get_cached_athlete() or {}
+        ftp = _safe_number(athlete.get("ftp"))
+        if ftp is not None and ftp <= 0:
+            ftp = None
+
+    cache = load_cache()
+    today = datetime.now().astimezone().date()
+    result = _build_training_load(cache.get("activities", []), ftp, days, today)
     return jsonify(result)
 
 
