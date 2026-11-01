@@ -147,8 +147,8 @@
                     return;
                 }
 
-                window.open(data.url, '_blank');
-                showResult('已在浏览器新标签页打开 Strava 授权页面。\n授权完成后会自动跳转到运动员信息页面。');
+                showResult('正在跳转 Strava 授权页面，授权完成后将自动进入数据页面。');
+                window.location.href = data.url;
             } catch (err) {
                 showResult('出错: ' + err.message);
             }
