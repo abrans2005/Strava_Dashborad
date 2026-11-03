@@ -578,7 +578,11 @@ def load_streams_cache(activity_id):
     cached_at = cache.get("cached_at")
     if not cached_at or time.time() - cached_at > STREAMS_CACHE_TTL_SECONDS:
         return None
-    return cache.get("data")
+    data = cache.get("data")
+    # 早期缓存没有轨迹点，视为失效以便补全 GPS 数据
+    if isinstance(data, dict) and "latlng" not in data:
+        return None
+    return data
 
 
 def save_streams_cache(activity_id, data):
@@ -792,6 +796,7 @@ def get_activity_streams(activity_id):
     watts_raw = streams.get("watts", {}).get("data") if isinstance(streams.get("watts"), dict) else []
     grade_raw = streams.get("grade_smooth", {}).get("data") if isinstance(streams.get("grade_smooth"), dict) else []
     time_raw = streams.get("time", {}).get("data") if isinstance(streams.get("time"), dict) else []
+    latlng_raw = streams.get("latlng", {}).get("data") if isinstance(streams.get("latlng"), dict) else []
 
     n = len(distance_raw) if distance_raw else 0
     if n == 0:
@@ -812,6 +817,7 @@ def get_activity_streams(activity_id):
     watts = align(watts_raw)
     grade = align(grade_raw)
     time_stream = align(time_raw)
+    latlng = align(latlng_raw)
 
     # 清洗 None 点：如果某个索引 distance 为 None，则整行丢弃
     valid_indices = [i for i in range(n) if distance[i] is not None]
@@ -825,6 +831,7 @@ def get_activity_streams(activity_id):
     watts = [watts[i] for i in valid_indices]
     grade = [grade[i] for i in valid_indices]
     time_stream = [time_stream[i] for i in valid_indices]
+    latlng = [latlng[i] for i in valid_indices]
 
     distance_km = [round(d / 1000, 3) for d in distance]
     velocity_kmh = [round(v * 3.6, 2) if v is not None else None for v in velocity]
@@ -869,10 +876,12 @@ def get_activity_streams(activity_id):
         "hr_zone_stats": hr_zone_stats,
         "has_hr": any(h is not None for h in heartrate),
         "has_watts": any(w is not None for w in watts),
+        "latlng": latlng,
+        "has_gps": any(p and len(p) >= 2 for p in latlng),
     }
 
-    # 降采样：如果点太多，按索引均匀采样
-    all_series = [result["distance_km"], result["altitude"], result["heartrate"], result["velocity_kmh"], result["watts"], result["grade"], result["time"]]
+    # 降采样：如果点太多，按索引均匀采样（轨迹点同步采样，保证与图表对齐）
+    all_series = [result["distance_km"], result["altitude"], result["heartrate"], result["velocity_kmh"], result["watts"], result["grade"], result["time"], result["latlng"]]
     sampled = _downsample(all_series, max_points=600)
     result["distance_km"] = sampled[0]
     result["altitude"] = sampled[1]
@@ -881,6 +890,7 @@ def get_activity_streams(activity_id):
     result["watts"] = sampled[4]
     result["grade"] = sampled[5]
     result["time"] = sampled[6]
+    result["latlng"] = sampled[7]
     # 降采样后爬坡段不必重新计算，使用原始统计即可
 
     save_streams_cache(activity_id, result)
@@ -1130,6 +1140,22 @@ def _parse_year_month_args():
     return year, month, None
 
 
+def _parse_sport_type_arg():
+    """读取运动类型筛选参数，空值视为未筛选。"""
+    sport_type = (request.args.get("sport_type") or "").strip()
+    return sport_type or None
+
+
+def _filter_activities_by_sport(activities, sport_type=None):
+    """按运动类型过滤：优先匹配 sport_type，兼容只有 type 的旧数据。"""
+    if not sport_type:
+        return activities
+    return [
+        a for a in activities
+        if sport_type in {a.get("sport_type"), a.get("type")}
+    ]
+
+
 @app.route("/stats")
 def get_stats():
     """活动数据统计：支持按本地年度、月度、活动类型筛选。"""
@@ -1140,8 +1166,10 @@ def get_stats():
     if error:
         return jsonify({"error": error}), 400
     activity_type = request.args.get("type")
+    sport_type = _parse_sport_type_arg()
 
     filtered = _filter_activities_by_date(activities, year=year, month=month)
+    filtered = _filter_activities_by_sport(filtered, sport_type)
     if activity_type:
         filtered = [a for a in filtered if a.get("type") == activity_type]
 
@@ -1156,7 +1184,7 @@ def get_stats():
 
     return jsonify(
         {
-            "filters": {"year": year, "month": month, "type": activity_type},
+            "filters": {"year": year, "month": month, "type": activity_type, "sport_type": sport_type},
             "summary": summary,
             "by_year": by_year,
             "by_month": by_month,
@@ -1167,19 +1195,21 @@ def get_stats():
 
 @app.route("/chart")
 def chart():
-    """按本地年月返回聚合指标，并让 year / month 同时作用于图表和汇总。"""
+    """按本地年月与运动类型返回聚合指标，并同时作用于图表和汇总。"""
     cache = load_cache()
     activities = cache.get("activities", [])
 
     year, month, error = _parse_year_month_args()
     if error:
         return jsonify({"error": error}), 400
+    sport_type = _parse_sport_type_arg()
     metric = request.args.get("metric", "distance_km")
     if metric not in {"count", "distance_km", "moving_time_hours", "elevation_gain_m"}:
         return jsonify({"error": "unsupported metric"}), 400
 
     all_metrics = ["count", "distance_km", "moving_time_hours", "elevation_gain_m"]
     filtered = _filter_activities_by_date(activities, year=year, month=month)
+    filtered = _filter_activities_by_sport(filtered, sport_type)
 
     groups = {}
     for activity in filtered:
@@ -1202,7 +1232,7 @@ def chart():
             series[m].append(agg.get(m, 0))
 
     return jsonify({
-        "filters": {"year": year, "month": month},
+        "filters": {"year": year, "month": month, "sport_type": sport_type},
         "labels": labels,
         "metric": metric,
         "series": series,
@@ -1215,7 +1245,7 @@ def power_distribution():
     """
     返回平均功率的直方图分布，并叠加正态分布拟合曲线。
     Y 轴使用「活动时间（小时）」加权，更能反映训练负荷分布。
-    支持按 year / month 过滤。
+    支持按 year / month / 运动类型过滤。
     """
     cache = load_cache()
     activities = cache.get("activities", [])
@@ -1223,7 +1253,9 @@ def power_distribution():
     year, month, error = _parse_year_month_args()
     if error:
         return jsonify({"error": error}), 400
+    sport_type = _parse_sport_type_arg()
     filtered = _filter_activities_by_date(activities, year=year, month=month)
+    filtered = _filter_activities_by_sport(filtered, sport_type)
 
     items = [
         (a["average_watts"], a.get("moving_time", 0) or 0)
@@ -1297,7 +1329,7 @@ def hr_zones():
     """
     返回平均心率区间分布。
     Y 轴使用「活动时间（小时）」加权。
-    支持按 year / month 过滤。
+    支持按 year / month / 运动类型过滤。
     """
     cache = load_cache()
     activities = cache.get("activities", [])
@@ -1305,7 +1337,9 @@ def hr_zones():
     year, month, error = _parse_year_month_args()
     if error:
         return jsonify({"error": error}), 400
+    sport_type = _parse_sport_type_arg()
     filtered = _filter_activities_by_date(activities, year=year, month=month)
+    filtered = _filter_activities_by_sport(filtered, sport_type)
 
     items = [
         (a["average_heartrate"], a.get("moving_time", 0) or 0)
@@ -1347,33 +1381,38 @@ def _is_ride(activity):
 
 @app.route("/chart/top-distance")
 def top_distance():
-    """返回里程排名前 20 的骑行活动，支持按 year / month 过滤。"""
+    """返回里程排名前 20 的活动，支持按 year / month / 运动类型过滤。"""
     year, month, error = _parse_year_month_args()
     if error:
         return jsonify({"error": error}), 400
+    sport_type = _parse_sport_type_arg()
 
     cache = load_cache()
     activities = _filter_activities_by_date(
         cache.get("activities", []), year=year, month=month
     )
-    rides = [a for a in activities if _is_ride(a)]
-    top = sorted(rides, key=lambda a: a.get("distance") or 0, reverse=True)[:20]
+    activities = _filter_activities_by_sport(activities, sport_type)
+    # 未指定运动类型时保持原来的“骑行”口径，指定后按所选类型排名
+    candidates = activities if sport_type else [a for a in activities if _is_ride(a)]
+    top = sorted(candidates, key=lambda a: a.get("distance") or 0, reverse=True)[:20]
     return jsonify([_activity_summary(a) for a in top])
 
 
 @app.route("/chart/top-elevation")
 def top_elevation():
-    """返回爬升排名前 20 的骑行活动，支持按 year / month 过滤。"""
+    """返回爬升排名前 20 的活动，支持按 year / month / 运动类型过滤。"""
     year, month, error = _parse_year_month_args()
     if error:
         return jsonify({"error": error}), 400
+    sport_type = _parse_sport_type_arg()
 
     cache = load_cache()
     activities = _filter_activities_by_date(
         cache.get("activities", []), year=year, month=month
     )
-    rides = [a for a in activities if _is_ride(a)]
-    top = sorted(rides, key=lambda a: a.get("total_elevation_gain") or 0, reverse=True)[:20]
+    activities = _filter_activities_by_sport(activities, sport_type)
+    candidates = activities if sport_type else [a for a in activities if _is_ride(a)]
+    top = sorted(candidates, key=lambda a: a.get("total_elevation_gain") or 0, reverse=True)[:20]
     return jsonify([_activity_summary(a) for a in top])
 
 
@@ -1408,6 +1447,277 @@ def chart_years():
         if (dt := _activity_local_datetime(activity)) is not None
     }
     return jsonify({'years': sorted(years, reverse=True)})
+
+
+# ============== 线路热图（Route Heatmap） ==============
+
+ROUTE_MAX_POINTS = 400          # 单条轨迹缓存的最大点数
+ROUTE_MAP_THIN_POINTS = 150     # 汇总页轨迹条数较少时每条保留的点数
+ROUTE_FETCH_BATCH_LIMIT = 50    # 单批补抓上限（Strava 读接口 100 次/15 分钟、1000 次/天）
+
+
+def _route_cache_path(activity_id):
+    return _cache_file(os.path.join("routes", f"{activity_id}.json"))
+
+
+def _cached_route_ids():
+    """当前运动员已缓存轨迹的活动 ID 集合（用目录列表，避免逐条读文件）。"""
+    directory = _cache_file("routes")
+    if not directory:
+        return set()
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return set()
+    return {
+        int(name[:-5])
+        for name in names
+        if name.endswith(".json") and name[:-5].isdigit()
+    }
+
+
+def load_route_cache(activity_id):
+    """加载已缓存的轨迹数据（轨迹不会变化，因此不设过期时间）。"""
+    cache = _read_json(_route_cache_path(activity_id))
+    if not isinstance(cache, dict) or cache.get("athlete_id") != _current_athlete_id():
+        return None
+    return cache.get("data")
+
+
+def save_route_cache(activity_id, data):
+    _atomic_write_json(_route_cache_path(activity_id), {
+        "athlete_id": _current_athlete_id(),
+        "cached_at": time.time(),
+        "data": data,
+    })
+
+
+def _find_activity_meta(activity_id):
+    """从活动缓存中取出画轨迹需要的元信息。"""
+    for activity in load_cache().get("activities", []):
+        if str(activity.get("id")) == str(activity_id):
+            return activity
+    return {}
+
+
+def _build_route_data(activity, latlng, distance_m, grade):
+    """整理前端绘图所需轨迹：经纬度、坡度、里程与爬坡段。"""
+    meta = {
+        "id": str(activity.get("id")) if activity.get("id") is not None else None,
+        "name": activity.get("name") or "未命名活动",
+        "sport_type": activity.get("sport_type") or activity.get("type"),
+        "start_date_local": activity.get("start_date_local") or activity.get("start_date"),
+        "distance_km": round((activity.get("distance") or 0) / 1000, 2),
+    }
+
+    points, distances, grades = [], [], []
+    distance_m = distance_m or []
+    grade = grade or []
+    for i, coord in enumerate(latlng or []):
+        if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+            continue
+        lat, lng = coord[0], coord[1]
+        if lat is None or lng is None:
+            continue
+        points.append([round(float(lat), 5), round(float(lng), 5)])
+        d = distance_m[i] if i < len(distance_m) else None
+        g = grade[i] if i < len(grade) else None
+        distances.append(round(float(d) / 1000, 3) if d is not None else None)
+        grades.append(round(float(g), 1) if g is not None else None)
+
+    if len(points) < 2:
+        return dict(meta, points=[], grades=[], distances_km=[], climbs=[], has_gps=False)
+
+    points, distances, grades = _downsample([points, distances, grades], ROUTE_MAX_POINTS)
+    climbs = _find_climb_segments(
+        [d if d is not None else 0 for d in distances], grades
+    )
+    return dict(
+        meta,
+        points=points,
+        grades=grades,
+        distances_km=distances,
+        climbs=climbs,
+        has_gps=True,
+    )
+
+
+def _build_route_from_streams(activity, streams):
+    """用已有的流数据构建轨迹，避免重复调用 Strava。"""
+    distance_km = streams.get("distance_km") or []
+    distance_m = [d * 1000 if d is not None else None for d in distance_km]
+    return _build_route_data(
+        activity, streams.get("latlng") or [], distance_m, streams.get("grade") or []
+    )
+
+
+def _fetch_route_streams(activity_id):
+    """只取画轨迹需要的三个流，减少 Strava 返回体积。"""
+    url = f"https://www.strava.com/api/v3/activities/{activity_id}/streams"
+    response = _strava_get(
+        url,
+        params={"keys": "latlng,distance,grade_smooth", "key_by_type": "true"},
+        timeout=60,
+    )
+    response.raise_for_status()
+    raw = response.json()
+
+    def data_of(key):
+        value = raw.get(key) if isinstance(raw, dict) else None
+        return (value.get("data") or []) if isinstance(value, dict) else []
+
+    return data_of("latlng"), data_of("distance"), data_of("grade_smooth")
+
+
+def _load_or_build_route(activity_id, activity=None, allow_fetch=True):
+    """优先用缓存，其次复用流数据，最后才调用 Strava。"""
+    cached = load_route_cache(activity_id)
+    if cached is not None:
+        return cached
+
+    if activity is None:
+        activity = _find_activity_meta(activity_id)
+
+    streams = load_streams_cache(activity_id)
+    if isinstance(streams, dict) and streams.get("latlng"):
+        data = _build_route_from_streams(activity, streams)
+        save_route_cache(activity_id, data)
+        return data
+
+    if not allow_fetch:
+        return None
+
+    try:
+        latlng, distance_m, grade = _fetch_route_streams(activity_id)
+    except requests.exceptions.HTTPError as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status == 404:
+            # 活动确实没有流数据（多为手动录入/室内），缓存空轨迹避免反复请求
+            data = _build_route_data(activity, [], [], [])
+            save_route_cache(activity_id, data)
+            return data
+        raise
+
+    data = _build_route_data(activity, latlng, distance_m, grade)
+    save_route_cache(activity_id, data)
+    return data
+
+
+def _route_points_limit(route_count):
+    """轨迹越多，单条保留的点越少，控制一次传输的体积。"""
+    if route_count <= 60:
+        return ROUTE_MAP_THIN_POINTS
+    if route_count <= 300:
+        return 80
+    if route_count <= 1000:
+        return 40
+    return 20
+
+
+def _thin_route(route, max_points=ROUTE_MAP_THIN_POINTS, precision=5):
+    """汇总页只保留形状，精简点数与坐标精度以减小传输体积。"""
+    points = route.get("points") or []
+    if len(points) <= max_points:
+        thinned = points
+    else:
+        step = len(points) / max_points
+        thinned = [points[min(len(points) - 1, int(i * step))] for i in range(max_points)]
+    rounded = [[round(float(p[0]), precision), round(float(p[1]), precision)] for p in thinned]
+    return {
+        "id": route.get("id"),
+        "name": route.get("name"),
+        "sport_type": route.get("sport_type"),
+        "start_date_local": route.get("start_date_local"),
+        "distance_km": route.get("distance_km"),
+        "points": rounded,
+    }
+
+
+@app.route("/map/routes")
+def map_routes():
+    """返回活动轨迹列表，支持 year / month / 运动类型筛选。
+
+    fetch 参数指定本次最多补抓多少条未缓存轨迹（前端会循环调用直到抓完）。
+    """
+    if not session_state.get("client"):
+        return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
+
+    year, month, error = _parse_year_month_args()
+    if error:
+        return jsonify({"error": error}), 400
+    sport_type = _parse_sport_type_arg()
+    fetch_limit = request.args.get("fetch", default=0, type=int) or 0
+    fetch_limit = max(0, min(fetch_limit, ROUTE_FETCH_BATCH_LIMIT))
+
+    _ensure_athlete_identity()
+    activities = _filter_activities_by_sport(
+        _filter_activities_by_date(
+            load_cache().get("activities", []), year=year, month=month
+        ),
+        sport_type,
+    )
+
+    cached_ids = _cached_route_ids()
+    matched = []
+    missing = 0
+    without_gps = 0
+    fetched = 0
+    failed = 0
+    rate_limited = False
+
+    total = len(activities)
+    processed = 0
+    for activity in activities:
+        activity_id = activity.get("id")
+        processed += 1
+        if activity_id is None:
+            continue
+
+        data = None
+        if activity_id in cached_ids:
+            data = load_route_cache(activity_id)
+        elif fetched < fetch_limit:
+            try:
+                data = _load_or_build_route(activity_id, activity)
+                fetched += 1
+            except requests.exceptions.HTTPError as e:
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                if status == 429:
+                    # Strava 读配额用尽：本轮停止补抓，剩余记录留待下次
+                    rate_limited = True
+                    missing += total - processed + 1  # 含当前这条尚未抓到的活动
+                    break
+                failed += 1
+                print(f"[/map/routes] 活动 {activity_id} 轨迹获取失败: {e}")
+            except requests.exceptions.RequestException as e:
+                failed += 1
+                print(f"[/map/routes] 活动 {activity_id} 轨迹获取失败: {e}")
+
+        if data is None:
+            missing += 1
+            continue
+        if not data.get("points"):
+            without_gps += 1
+            continue
+        matched.append(data)
+
+    point_limit = _route_points_limit(len(matched))
+    precision = 5 if len(matched) <= 300 else 4
+    routes = [_thin_route(route, point_limit, precision) for route in matched]
+
+    return jsonify({
+        "routes": routes,
+        "stats": {
+            "total": total,
+            "returned": len(routes),
+            "missing": missing,
+            "without_gps": without_gps,
+            "fetched": fetched,
+            "failed": failed,
+            "rate_limited": rate_limited,
+        },
+        "filters": {"year": year, "month": month, "sport_type": sport_type},
+    })
 
 
 # ============== 赛段（Segment）分析 ==============
