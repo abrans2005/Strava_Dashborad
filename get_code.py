@@ -1,4 +1,5 @@
 import os
+import secrets
 import webbrowser
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -9,25 +10,24 @@ os.environ.setdefault("SILENCE_TOKEN_WARNINGS", "true")
 
 from stravalib import Client
 
-# 配置参数
-CLIENT_ID = "117705"
-CLIENT_SECRET = "fb23832768654cfe5ffa53ee6eb80e349b0d6461"
+CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID", "").strip()
+CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "").strip()
 PORT = int(os.environ.get("PORT", "5001"))
 REDIRECT_URI = f"http://127.0.0.1:{PORT}/authorization"
 SCOPE = "read,activity:read,profile:read_all"
 
-# 授权流程中需要保存的结果
 code = None
 access_token = None
 refresh_token = None
 
 
-def build_auth_url():
+def build_auth_url(state):
     params = {
         "client_id": CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
         "response_type": "code",
         "scope": SCOPE,
+        "state": state,
     }
     return "https://www.strava.com/oauth/mobile/authorize?" + urllib.parse.urlencode(
         params
@@ -35,33 +35,39 @@ def build_auth_url():
 
 
 def wait_for_code():
-    """启动本地 HTTP 服务器、打开浏览器，等待回调并返回 code。"""
+    """启动本地 HTTP 服务器、打开浏览器，校验 state 后返回 code。"""
     result = {"code": None}
+    expected_state = secrets.token_urlsafe(32)
 
     class OAuthHandler(BaseHTTPRequestHandler):
         def do_GET(self):
             parsed = urllib.parse.urlparse(self.path)
             query = urllib.parse.parse_qs(parsed.query)
-            result["code"] = query.get("code", [None])[0]
+            code_value = query.get("code", [None])[0]
+            returned_state = query.get("state", [None])[0]
+            state_valid = returned_state and secrets.compare_digest(
+                expected_state, returned_state
+            )
 
-            if result["code"]:
-                print(f"\n获取到 code: {result['code']}\n")
+            if code_value and state_valid:
+                result["code"] = code_value
+                status = 200
+                message = "授权成功，可以关闭此页面。"
             else:
-                print("\n回调 URL 中没有 code 参数\n")
+                status = 400
+                message = "授权回调校验失败，请返回终端重新发起授权。"
 
-            self.send_response(200)
+            self.send_response(status)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(
-                "<html><body><h1>授权成功，可以关闭此页面。</h1></body></html>".encode(
-                    "utf-8"
-                )
+                f"<html><body><h1>{message}</h1></body></html>".encode("utf-8")
             )
 
         def log_message(self, format, *args):
             pass
 
-    auth_url = build_auth_url()
+    auth_url = build_auth_url(expected_state)
     print(f"授权 URL: {auth_url}")
     print(f"等待浏览器跳转，监听 {REDIRECT_URI} ...\n")
 
@@ -75,7 +81,7 @@ def wait_for_code():
 
 
 def exchange_token(code_value):
-    """用 code 换取 access_token 和 refresh_token，并设置好已授权的 client。"""
+    """用 code 换取 Token，并设置好已授权的 client。"""
     global access_token, refresh_token
 
     client = Client()
@@ -106,23 +112,22 @@ def fetch_athlete(client):
 
 
 def main():
-    global code, access_token, refresh_token
+    global code
+
+    if not CLIENT_ID or not CLIENT_SECRET:
+        print("请先设置 STRAVA_CLIENT_ID 和 STRAVA_CLIENT_SECRET 环境变量")
+        return
 
     code = wait_for_code()
     if not code:
-        print("未获取到 code")
+        print("未获取到有效授权回调")
         return
-
-    print(f"保存到变量 code 的值: {code}")
 
     try:
         client = exchange_token(code)
     except Exception as e:
         print(f"\n用 code 换取 token 失败: {e}")
         return
-
-    print(f"access_token:  {access_token}")
-    print(f"refresh_token: {refresh_token}")
 
     try:
         fetch_athlete(client)

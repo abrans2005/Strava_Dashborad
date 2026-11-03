@@ -1,6 +1,8 @@
 import json
 import math
 import os
+import secrets
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -17,108 +19,35 @@ from stravalib import Client
 
 app = Flask(__name__)
 
-# 默认配置，用户可以在页面上覆盖
-DEFAULT_CLIENT_ID = "117705"
-DEFAULT_CLIENT_SECRET = "fb23832768654cfe5ffa53ee6eb80e349b0d6461"
+DEFAULT_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID", "").strip()
+DEFAULT_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "").strip()
 PORT = int(os.environ.get("PORT", "5001"))
 REDIRECT_URI = f"http://127.0.0.1:{PORT}/authorization"
 SCOPE = "read,activity:read,profile:read_all"
+TOKEN_REFRESH_BUFFER_SECONDS = 60
 
-# 活动数据缓存配置
-CACHE_FILE = "activities_cache.json"
-CACHE_VERSION = 2  # 缓存结构版本，字段变更时递增以触发全量同步
-AUTO_SYNC_INTERVAL_SECONDS = 2 * 60 * 60  # 每 2 小时自动同步一次
-SYNC_BUFFER_MINUTES = 5  # 增量同步时往回多查 5 分钟，避免漏掉离线上传的活动
+CACHE_ROOT_DIR = "cache"
+ACTIVITY_CACHE_FILENAME = "activities.json"
+ATHLETE_CACHE_FILENAME = "athlete.json"
+CACHE_VERSION = 3
+AUTO_SYNC_INTERVAL_SECONDS = 2 * 60 * 60
+FULL_SYNC_INTERVAL_SECONDS = 24 * 60 * 60
+SYNC_BUFFER_MINUTES = 5
+ATHLETE_CACHE_TTL_SECONDS = 3600
 
-# 运动员信息缓存配置（减少 Strava API 调用）
-ATHLETE_CACHE_FILE = "athlete_cache.json"
-ATHLETE_CACHE_TTL_SECONDS = 3600  # 1 小时
+_cache_lock = threading.RLock()
+_sync_lock = threading.Lock()
+_token_lock = threading.RLock()
 
-
-def _token_fingerprint():
-    """用 access_token 后 8 位作为当前授权的指纹，用于缓存失效判断。"""
-    token = session_state.get("access_token")
-    return token[-8:] if token else None
-
-
-def load_athlete_cache():
-    """加载运动员信息缓存。"""
-    try:
-        with open(ATHLETE_CACHE_FILE, "r", encoding="utf-8") as f:
-            cache = json.load(f)
-            if not isinstance(cache, dict):
-                return {}
-            return cache
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def save_athlete_cache(cache):
-    """保存运动员信息缓存。"""
-    with open(ATHLETE_CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
-
-
-def clear_athlete_cache():
-    """清除运动员信息缓存（换账号/重新授权时调用）。"""
-    try:
-        os.remove(ATHLETE_CACHE_FILE)
-    except FileNotFoundError:
-        pass
-
-
-def get_cached_athlete():
-    """获取未过期的运动员信息缓存，token 变化时自动失效。"""
-    cache = load_athlete_cache()
-    fp = _token_fingerprint()
-    if not fp or cache.get("token_fp") != fp:
-        return None
-    cached_at = cache.get("cached_at")
-    if not cached_at or time.time() - cached_at > ATHLETE_CACHE_TTL_SECONDS:
-        return None
-    return cache.get("athlete")
-
-
-def set_cached_athlete(athlete):
-    """缓存运动员信息。"""
-    save_athlete_cache({
-        "token_fp": _token_fingerprint(),
-        "cached_at": time.time(),
-        "athlete": athlete,
-        "zones": load_athlete_cache().get("zones"),
-        "zones_cached_at": load_athlete_cache().get("zones_cached_at"),
-    })
-
-
-def get_cached_zones():
-    """获取未过期的心率区间缓存，token 变化时自动失效。"""
-    cache = load_athlete_cache()
-    fp = _token_fingerprint()
-    if not fp or cache.get("token_fp") != fp:
-        return None
-    cached_at = cache.get("zones_cached_at")
-    if not cached_at or time.time() - cached_at > ATHLETE_CACHE_TTL_SECONDS:
-        return None
-    return cache.get("zones")
-
-
-def set_cached_zones(zones):
-    """缓存心率区间。"""
-    cache = load_athlete_cache()
-    cache["token_fp"] = _token_fingerprint()
-    cache["zones_cached_at"] = time.time()
-    cache["zones"] = zones
-    save_athlete_cache(cache)
-
-
-# 保存授权流程的结果
-# 在本地单用户场景下用全局状态即可
+# 本地单用户场景下使用全局状态；敏感值只保存在当前进程内。
 session_state = {
     "client_id": None,
     "client_secret": None,
-    "code": None,
+    "oauth_state": None,
     "access_token": None,
     "refresh_token": None,
+    "expires_at": None,
+    "athlete_id": None,
     "client": None,
 }
 
@@ -131,13 +60,181 @@ def get_credentials():
     }
 
 
+def _current_athlete_id():
+    athlete_id = session_state.get("athlete_id")
+    return str(athlete_id) if athlete_id is not None else None
+
+
+def _cache_file(filename):
+    athlete_id = _current_athlete_id()
+    if not athlete_id:
+        return None
+    return os.path.join(CACHE_ROOT_DIR, athlete_id, filename)
+
+
+def _read_json(path):
+    if not path:
+        return None
+    with _cache_lock:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+
+
+def _atomic_write_json(path, data):
+    if not path:
+        raise RuntimeError("尚未确定运动员身份，无法写入缓存")
+    with _cache_lock:
+        directory = os.path.dirname(path)
+        os.makedirs(directory, exist_ok=True)
+        fd, temp_path = tempfile.mkstemp(prefix=".tmp-", suffix=".json", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, path)
+        except Exception:
+            try:
+                os.remove(temp_path)
+            except FileNotFoundError:
+                pass
+            raise
+
+
+def _store_token_response(response):
+    session_state["access_token"] = response["access_token"]
+    session_state["refresh_token"] = (
+        response.get("refresh_token") or session_state.get("refresh_token")
+    )
+    expires_at = response.get("expires_at")
+    session_state["expires_at"] = int(expires_at) if expires_at is not None else None
+
+    athlete = response.get("athlete") or {}
+    if athlete.get("id") is not None:
+        session_state["athlete_id"] = str(athlete["id"])
+
+    client = session_state.get("client")
+    if client:
+        client.access_token = session_state["access_token"]
+
+
+def get_valid_access_token():
+    """返回有效 Token，并在临近过期时用 Refresh Token 自动刷新。"""
+    with _token_lock:
+        token = session_state.get("access_token")
+        if not token:
+            raise RuntimeError("未授权")
+
+        expires_at = session_state.get("expires_at")
+        if expires_at and time.time() >= expires_at - TOKEN_REFRESH_BUFFER_SECONDS:
+            refresh_token = session_state.get("refresh_token")
+            if not refresh_token:
+                raise RuntimeError("Access Token 已过期，且没有 Refresh Token")
+            creds = get_credentials()
+            response = requests.post(
+                "https://www.strava.com/api/v3/oauth/token",
+                data={
+                    "client_id": creds["client_id"],
+                    "client_secret": creds["client_secret"],
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+            _store_token_response(response.json())
+
+        return session_state["access_token"]
+
+
+def _ensure_athlete_identity():
+    athlete_id = _current_athlete_id()
+    if athlete_id:
+        return athlete_id
+
+    client = session_state.get("client")
+    if not client:
+        raise RuntimeError("未授权")
+    get_valid_access_token()
+    athlete = client.get_athlete()
+    session_state["athlete_id"] = str(athlete.id)
+    return session_state["athlete_id"]
+
+
+def load_athlete_cache():
+    """加载当前运动员的信息缓存。"""
+    cache = _read_json(_cache_file(ATHLETE_CACHE_FILENAME))
+    if not isinstance(cache, dict):
+        return {}
+    if cache.get("athlete_id") != _current_athlete_id():
+        return {}
+    return cache
+
+
+def save_athlete_cache(cache):
+    cache["athlete_id"] = _current_athlete_id()
+    _atomic_write_json(_cache_file(ATHLETE_CACHE_FILENAME), cache)
+
+
+def clear_athlete_cache():
+    """清除当前运动员的信息缓存。"""
+    path = _cache_file(ATHLETE_CACHE_FILENAME)
+    if not path:
+        return
+    with _cache_lock:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
+def get_cached_athlete():
+    cache = load_athlete_cache()
+    cached_at = cache.get("cached_at")
+    if not cached_at or time.time() - cached_at > ATHLETE_CACHE_TTL_SECONDS:
+        return None
+    return cache.get("athlete")
+
+
+def set_cached_athlete(athlete):
+    with _cache_lock:
+        cache = load_athlete_cache()
+        cache.update({
+            "cached_at": time.time(),
+            "athlete": athlete,
+        })
+        save_athlete_cache(cache)
+
+
+def get_cached_zones():
+    cache = load_athlete_cache()
+    cached_at = cache.get("zones_cached_at")
+    if not cached_at or time.time() - cached_at > ATHLETE_CACHE_TTL_SECONDS:
+        return None
+    return cache.get("zones")
+
+
+def set_cached_zones(zones):
+    with _cache_lock:
+        cache = load_athlete_cache()
+        cache["zones_cached_at"] = time.time()
+        cache["zones"] = zones
+        save_athlete_cache(cache)
+
+
 def build_auth_url():
     creds = get_credentials()
+    state = secrets.token_urlsafe(32)
+    session_state["oauth_state"] = state
     params = {
         "client_id": creds["client_id"],
         "redirect_uri": REDIRECT_URI,
         "response_type": "code",
         "scope": SCOPE,
+        "state": state,
     }
     return "https://www.strava.com/oauth/mobile/authorize?" + urllib.parse.urlencode(
         params
@@ -146,27 +243,25 @@ def build_auth_url():
 
 @app.route("/")
 def index():
-    """登录页：填写 client_id / client_secret 并发起连接。"""
     error = request.args.get("error")
     return render_template(
         "index.html",
         default_client_id=DEFAULT_CLIENT_ID,
-        default_client_secret=DEFAULT_CLIENT_SECRET,
+        has_default_client_secret=bool(DEFAULT_CLIENT_SECRET),
         error=error,
     )
 
 
 @app.route("/configure", methods=["POST"])
 def configure():
-    """接收用户填写的 client_id / client_secret，保存后返回授权 URL。"""
     data = request.get_json() or {}
-    client_id = (data.get("client_id") or "").strip()
-    client_secret = (data.get("client_secret") or "").strip()
+    client_id = (data.get("client_id") or "").strip() or DEFAULT_CLIENT_ID
+    client_secret = (data.get("client_secret") or "").strip() or DEFAULT_CLIENT_SECRET
 
     if not client_id:
         return jsonify({"error": "client_id 不能为空"}), 400
     if not client_secret:
-        return jsonify({"error": "client_secret 不能为空"}), 400
+        return jsonify({"error": "请填写 client_secret，或设置 STRAVA_CLIENT_SECRET 环境变量"}), 400
 
     session_state["client_id"] = client_id
     session_state["client_secret"] = client_secret
@@ -176,19 +271,26 @@ def configure():
 
 @app.route("/authorization")
 def authorization_callback():
-    """Strava 授权回调：提取 code 并换取 access_token / refresh_token。"""
-    code = request.args.get("code")
-    error = request.args.get("error")
+    """校验 OAuth state，并用一次性 code 换取 Token。"""
+    expected_state = session_state.get("oauth_state")
+    returned_state = request.args.get("state")
+    if (
+        not expected_state
+        or not returned_state
+        or not secrets.compare_digest(expected_state, returned_state)
+    ):
+        return redirect("/?error=OAuth state 校验失败，请重新发起授权")
+    session_state["oauth_state"] = None
 
+    error = request.args.get("error")
     if error:
         return redirect(f"/?error={urllib.parse.quote(error)}")
 
+    code = request.args.get("code")
     if not code:
         return redirect("/?error=未获取到 code")
 
-    session_state["code"] = code
     creds = get_credentials()
-
     try:
         client = Client()
         response = client.exchange_code_for_token(
@@ -196,18 +298,11 @@ def authorization_callback():
             client_secret=creds["client_secret"],
             code=code,
         )
-
-        access_token = response["access_token"]
-        refresh_token = response["refresh_token"]
-
-        session_state["access_token"] = access_token
-        session_state["refresh_token"] = refresh_token
         session_state["client"] = client
-        client.access_token = access_token
-
-        # 重新授权后清掉旧的运动员信息缓存
+        session_state["athlete_id"] = None
+        _store_token_response(response)
+        _ensure_athlete_identity()
         clear_athlete_cache()
-
     except Exception as e:
         return redirect(f"/?error={urllib.parse.quote(str(e))}")
 
@@ -216,17 +311,9 @@ def authorization_callback():
 
 @app.route("/dashboard")
 def dashboard():
-    """授权成功后的新页面，显示 token 并获取运动员信息。"""
     if not session_state["client"]:
         return redirect("/?error=请先完成授权")
-
-    return render_template(
-        "dashboard.html",
-        client_id=session_state.get("client_id") or DEFAULT_CLIENT_ID,
-        code=session_state["code"],
-        access_token=session_state["access_token"],
-        refresh_token=session_state["refresh_token"],
-    )
+    return render_template("dashboard.html")
 
 
 def to_number(value):
@@ -312,6 +399,8 @@ def get_athlete():
         return jsonify(cached)
 
     try:
+        _ensure_athlete_identity()
+        get_valid_access_token()
         athlete = client.get_athlete()
     except Exception as e:
         print(f"[/athlete] 调用 client.get_athlete() 失败: {e}")
@@ -425,19 +514,15 @@ def get_athlete_zones():
     if not client:
         return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
 
+    _ensure_athlete_identity()
     cached = get_cached_zones()
     # 旧缓存是对象（{heart_rate, power}），新格式是数组；旧格式直接废弃重取
     if cached is not None and isinstance(cached, list):
         return jsonify(cached)
 
-    token = session_state.get("access_token")
     try:
-        response = requests.get(
-            "https://www.strava.com/api/v3/athlete/zones",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=30,
-        )
-        print(f"[/athlete/zones] Strava API status={response.status_code}, body preview={response.text[:200]}")
+        response = _strava_get("https://www.strava.com/api/v3/athlete/zones")
+        print(f"[/athlete/zones] Strava API status={response.status_code}")
         response.raise_for_status()
         zones = response.json()
         # 保证返回的是数组
@@ -476,50 +561,33 @@ def get_athlete_zones():
 
 # ============== 活动流数据（Streams）缓存与分析 ==============
 
-STREAMS_CACHE_DIR = "streams_cache"
 STREAMS_CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 小时
 
 
 def _streams_cache_path(activity_id):
-    """返回某个活动流数据缓存文件路径。"""
-    return os.path.join(STREAMS_CACHE_DIR, f"{activity_id}.json")
-
-
-def _ensure_streams_cache_dir():
-    """确保流数据缓存目录存在。"""
-    os.makedirs(STREAMS_CACHE_DIR, exist_ok=True)
+    return _cache_file(os.path.join("streams", f"{activity_id}.json"))
 
 
 def load_streams_cache(activity_id):
-    """加载某个活动的流数据缓存。"""
-    path = _streams_cache_path(activity_id)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            cache = json.load(f)
-        if not isinstance(cache, dict):
-            return None
-        cached_at = cache.get("cached_at")
-        if not cached_at or time.time() - cached_at > STREAMS_CACHE_TTL_SECONDS:
-            return None
-        # token 变化时失效
-        if cache.get("token_fp") != _token_fingerprint():
-            return None
-        return cache.get("data")
-    except (FileNotFoundError, json.JSONDecodeError):
+    """加载当前运动员某个活动的流数据缓存。"""
+    cache = _read_json(_streams_cache_path(activity_id))
+    if not isinstance(cache, dict):
         return None
+    if cache.get("athlete_id") != _current_athlete_id():
+        return None
+    cached_at = cache.get("cached_at")
+    if not cached_at or time.time() - cached_at > STREAMS_CACHE_TTL_SECONDS:
+        return None
+    return cache.get("data")
 
 
 def save_streams_cache(activity_id, data):
-    """保存某个活动的流数据缓存。"""
-    _ensure_streams_cache_dir()
-    path = _streams_cache_path(activity_id)
     cache = {
-        "token_fp": _token_fingerprint(),
+        "athlete_id": _current_athlete_id(),
         "cached_at": time.time(),
         "data": data,
     }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
+    _atomic_write_json(_streams_cache_path(activity_id), cache)
 
 
 def _moving_average(data, window=7):
@@ -687,17 +755,16 @@ def get_activity_streams(activity_id):
     if not session_state.get("client"):
         return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
 
+    _ensure_athlete_identity()
     cached = load_streams_cache(activity_id)
     if cached is not None:
         return jsonify(cached)
 
-    token = session_state.get("access_token")
     keys = "distance,altitude,heartrate,velocity_smooth,watts,grade_smooth,time,latlng"
     url = f"https://www.strava.com/api/v3/activities/{activity_id}/streams"
     try:
-        response = requests.get(
+        response = _strava_get(
             url,
-            headers={"Authorization": f"Bearer {token}"},
             params={"keys": keys, "key_by_type": "true"},
             timeout=60,
         )
@@ -848,26 +915,32 @@ def activity_to_dict(a):
     }
 
 
+def _empty_activity_cache():
+    return {
+        "version": CACHE_VERSION,
+        "athlete_id": _current_athlete_id(),
+        "last_sync_time": None,
+        "last_full_sync_time": None,
+        "activities": [],
+    }
+
+
 def load_cache():
-    """从本地文件加载活动缓存。版本不匹配时返回空缓存以触发全量同步。"""
-    try:
-        with open(CACHE_FILE, "r", encoding="utf-8") as f:
-            cache = json.load(f)
-            if (
-                not isinstance(cache, dict)
-                or cache.get("version") != CACHE_VERSION
-            ):
-                return {"version": CACHE_VERSION, "last_sync_time": None, "activities": []}
-            return cache
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"version": CACHE_VERSION, "last_sync_time": None, "activities": []}
+    """加载当前运动员的活动缓存，其他账号的数据不可见。"""
+    cache = _read_json(_cache_file(ACTIVITY_CACHE_FILENAME))
+    if (
+        not isinstance(cache, dict)
+        or cache.get("version") != CACHE_VERSION
+        or cache.get("athlete_id") != _current_athlete_id()
+    ):
+        return _empty_activity_cache()
+    return cache
 
 
 def save_cache(cache):
-    """把活动缓存写入本地文件。"""
     cache["version"] = CACHE_VERSION
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
+    cache["athlete_id"] = _current_athlete_id()
+    _atomic_write_json(_cache_file(ACTIVITY_CACHE_FILENAME), cache)
 
 
 def merge_activities(existing, new):
@@ -888,44 +961,67 @@ def sort_activities(activities):
 
 
 def sync_activities(force_full=False):
-    """
-    同步活动数据。
-    - 首次调用或 force_full=True：全量同步
-    - 后续调用：只同步 last_sync_time 之后新增/更新的活动
-    """
-    client = session_state.get("client")
-    if not client:
-        raise RuntimeError("未授权，无法同步活动数据")
+    """增量同步近期活动，并每天全量对账上传、修改和删除。"""
+    with _sync_lock:
+        client = session_state.get("client")
+        if not client:
+            raise RuntimeError("未授权，无法同步活动数据")
 
-    cache = load_cache()
-    last_sync_time_str = cache.get("last_sync_time")
+        get_valid_access_token()
+        athlete_id = _ensure_athlete_identity()
+        cache = load_cache()
+        now = datetime.now(timezone.utc)
 
-    if force_full or not last_sync_time_str:
-        after = None
-        print(f"[{datetime.now(timezone.utc)}] 开始全量同步活动数据...")
-    else:
-        last_sync_time = datetime.fromisoformat(last_sync_time_str)
-        after = last_sync_time - timedelta(minutes=SYNC_BUFFER_MINUTES)
-        print(f"[{datetime.now(timezone.utc)}] 开始增量同步，after={after.isoformat()}...")
+        last_sync_time = None
+        last_full_sync_time = None
+        try:
+            if cache.get("last_sync_time"):
+                last_sync_time = datetime.fromisoformat(cache["last_sync_time"])
+            if cache.get("last_full_sync_time"):
+                last_full_sync_time = datetime.fromisoformat(cache["last_full_sync_time"])
+        except (TypeError, ValueError):
+            last_sync_time = None
+            last_full_sync_time = None
 
-    if after:
-        activities_iterator = client.get_activities(after=after)
-    else:
-        activities_iterator = client.get_activities()
+        full_sync = (
+            force_full
+            or last_sync_time is None
+            or last_full_sync_time is None
+            or now - last_full_sync_time >= timedelta(seconds=FULL_SYNC_INTERVAL_SECONDS)
+        )
 
-    new_activities = [activity_to_dict(a) for a in activities_iterator]
+        if full_sync:
+            after = None
+            print(f"[{now}] 开始全量同步运动员 {athlete_id} 的活动数据...")
+        else:
+            after = last_sync_time - timedelta(minutes=SYNC_BUFFER_MINUTES)
+            print(f"[{now}] 开始增量同步，after={after.isoformat()}...")
 
-    merged = merge_activities(cache.get("activities", []), new_activities)
-    merged = sort_activities(merged)
+        if after:
+            activities_iterator = client.get_activities(after=after)
+        else:
+            activities_iterator = client.get_activities()
+        new_activities = [activity_to_dict(a) for a in activities_iterator]
 
-    cache["activities"] = merged
-    cache["last_sync_time"] = datetime.now(timezone.utc).isoformat()
-    save_cache(cache)
+        if _current_athlete_id() != athlete_id:
+            raise RuntimeError("授权账号已切换，本次同步结果已丢弃")
 
-    sync_type = "全量" if after is None else "增量"
-    print(f"[{datetime.now(timezone.utc)}] {sync_type}同步完成，共 {len(merged)} 条活动，本次新增/更新 {len(new_activities)} 条。")
+        if full_sync:
+            merged = sort_activities(new_activities)
+        else:
+            merged = sort_activities(
+                merge_activities(cache.get("activities", []), new_activities)
+            )
 
-    return merged
+        cache["activities"] = merged
+        cache["last_sync_time"] = now.isoformat()
+        if full_sync:
+            cache["last_full_sync_time"] = now.isoformat()
+        save_cache(cache)
+
+        sync_type = "全量" if full_sync else "增量"
+        print(f"[{now}] {sync_type}同步完成，共 {len(merged)} 条活动，本次新增/更新 {len(new_activities)} 条。")
+        return merged
 
 
 def aggregate_activities(activities):
@@ -1308,63 +1404,44 @@ def chart_years():
 
 # ============== 赛段（Segment）分析 ==============
 
-SEGMENTS_CACHE_DIR = "segments_cache"
 SEGMENTS_CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 小时
 
 
-def _ensure_segments_cache_dir():
-    """确保赛段缓存目录存在。"""
-    os.makedirs(SEGMENTS_CACHE_DIR, exist_ok=True)
-
-
 def _segments_cache_path(name):
-    """返回赛段缓存文件路径。"""
-    return os.path.join(SEGMENTS_CACHE_DIR, f"{name}.json")
+    return _cache_file(os.path.join("segments", f"{name}.json"))
 
 
 def _load_segments_cache(name):
-    """加载赛段缓存。"""
-    path = _segments_cache_path(name)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            cache = json.load(f)
-        if not isinstance(cache, dict):
-            return None
-        cached_at = cache.get("cached_at")
-        if not cached_at or time.time() - cached_at > SEGMENTS_CACHE_TTL_SECONDS:
-            return None
-        if cache.get("token_fp") != _token_fingerprint():
-            return None
-        return cache.get("data")
-    except (FileNotFoundError, json.JSONDecodeError):
+    """加载当前运动员的赛段缓存。"""
+    cache = _read_json(_segments_cache_path(name))
+    if not isinstance(cache, dict):
         return None
+    if cache.get("athlete_id") != _current_athlete_id():
+        return None
+    cached_at = cache.get("cached_at")
+    if not cached_at or time.time() - cached_at > SEGMENTS_CACHE_TTL_SECONDS:
+        return None
+    return cache.get("data")
 
 
 def _save_segments_cache(name, data):
-    """保存赛段缓存。"""
-    _ensure_segments_cache_dir()
-    path = _segments_cache_path(name)
     cache = {
-        "token_fp": _token_fingerprint(),
+        "athlete_id": _current_athlete_id(),
         "cached_at": time.time(),
         "data": data,
     }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
+    _atomic_write_json(_segments_cache_path(name), cache)
 
 
 def _strava_get(url, params=None, timeout=30):
-    """使用当前 access_token 向 Strava API 发送 GET 请求。"""
-    token = session_state.get("access_token")
-    if not token:
-        raise RuntimeError("未授权")
-    response = requests.get(
+    """使用有效 Token 向 Strava API 发送 GET 请求。"""
+    token = get_valid_access_token()
+    return requests.get(
         url,
         headers={"Authorization": f"Bearer {token}"},
         params=params,
         timeout=timeout,
     )
-    return response
 
 
 def _safe_number(value):
@@ -1479,6 +1556,7 @@ def get_activity_segments(activity_id):
     if not session_state.get("client"):
         return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
 
+    _ensure_athlete_identity()
     cached = _load_segments_cache(f"activity_{activity_id}_segments")
     if cached is not None:
         return jsonify(cached)
@@ -1513,6 +1591,7 @@ def get_segment_efforts(segment_id):
     if not session_state.get("client"):
         return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
 
+    _ensure_athlete_identity()
     cached = _load_segments_cache(f"segment_{segment_id}_efforts")
     if cached is not None:
         return jsonify(cached)
@@ -1589,6 +1668,7 @@ def get_segment_effort_detail(effort_id):
     if not session_state.get("client"):
         return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
 
+    _ensure_athlete_identity()
     cached = _load_segments_cache(f"effort_{effort_id}")
     if cached is not None:
         return jsonify(cached)
@@ -1832,7 +1912,7 @@ def get_training_load():
 
 
 def auto_sync_loop():
-    """后台线程：每隔 AUTO_SYNC_INTERVAL_SECONDS 执行一次增量同步。"""
+    """后台线程：定期增量同步，并由同步函数按周期全量对账。"""
     while True:
         time.sleep(AUTO_SYNC_INTERVAL_SECONDS)
         try:
@@ -1843,8 +1923,7 @@ def auto_sync_loop():
 
 
 if __name__ == "__main__":
-    # 启动自动同步后台线程
     sync_thread = threading.Thread(target=auto_sync_loop, daemon=True)
     sync_thread.start()
 
-    app.run(host="127.0.0.1", port=PORT, debug=True)
+    app.run(host="127.0.0.1", port=PORT, debug=True, use_reloader=False)
