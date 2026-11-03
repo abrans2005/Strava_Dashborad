@@ -29,7 +29,7 @@ TOKEN_REFRESH_BUFFER_SECONDS = 60
 CACHE_ROOT_DIR = "cache"
 ACTIVITY_CACHE_FILENAME = "activities.json"
 ATHLETE_CACHE_FILENAME = "athlete.json"
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 AUTO_SYNC_INTERVAL_SECONDS = 2 * 60 * 60
 FULL_SYNC_INTERVAL_SECONDS = 24 * 60 * 60
 SYNC_BUFFER_MINUTES = 5
@@ -896,7 +896,8 @@ def activity_to_dict(a):
         "name": to_str(a.name),
         "type": to_str(a.type),
         "sport_type": to_str(getattr(a, "sport_type", None)),
-        "start_date": a.start_date.isoformat() if a.start_date else None,
+        "start_date": _to_iso(a.start_date),
+        "start_date_local": _to_iso(getattr(a, "start_date_local", None)),
         "distance": to_number(a.distance),
         "moving_time": to_number(a.moving_time),
         "elapsed_time": to_number(a.elapsed_time),
@@ -915,6 +916,22 @@ def activity_to_dict(a):
     }
 
 
+def _activity_local_datetime(activity):
+    """优先使用 Strava 本地开始时间，旧缓存回退到 UTC 转服务器本地时间。"""
+    for field in ("start_date_local", "start_date"):
+        value = activity.get(field)
+        if not value:
+            continue
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if field == "start_date" and dt.tzinfo:
+            dt = dt.astimezone()
+        return dt.replace(tzinfo=None)
+    return None
+
+
 def _empty_activity_cache():
     return {
         "version": CACHE_VERSION,
@@ -928,12 +945,11 @@ def _empty_activity_cache():
 def load_cache():
     """加载当前运动员的活动缓存，其他账号的数据不可见。"""
     cache = _read_json(_cache_file(ACTIVITY_CACHE_FILENAME))
-    if (
-        not isinstance(cache, dict)
-        or cache.get("version") != CACHE_VERSION
-        or cache.get("athlete_id") != _current_athlete_id()
-    ):
+    if not isinstance(cache, dict) or cache.get("athlete_id") != _current_athlete_id():
         return _empty_activity_cache()
+    if cache.get("version") != CACHE_VERSION:
+        # 版本升级后保留旧数据先用，同时标记需要一次全量同步来补齐新字段。
+        cache["needs_full_sync"] = True
     return cache
 
 
@@ -987,6 +1003,7 @@ def sync_activities(force_full=False):
             force_full
             or last_sync_time is None
             or last_full_sync_time is None
+            or cache.get("needs_full_sync")
             or now - last_full_sync_time >= timedelta(seconds=FULL_SYNC_INTERVAL_SECONDS)
         )
 
@@ -1017,6 +1034,7 @@ def sync_activities(force_full=False):
         cache["last_sync_time"] = now.isoformat()
         if full_sync:
             cache["last_full_sync_time"] = now.isoformat()
+        cache.pop("needs_full_sync", None)
         save_cache(cache)
 
         sync_type = "全量" if full_sync else "增量"
@@ -1071,45 +1089,69 @@ def get_activities():
         return jsonify({"error": str(e)}), 500
 
 
+def _filter_activities_by_date(activities, year=None, month=None):
+    """按活动的本地开始年份 / 月份过滤。"""
+    filtered = []
+    for activity in activities:
+        dt = _activity_local_datetime(activity)
+        if dt is None:
+            continue
+        if year is not None and dt.year != year:
+            continue
+        if month is not None and dt.month != month:
+            continue
+        filtered.append(activity)
+    return filtered
+
+
+def _parse_int_arg(name):
+    """读取整数查询参数：空值视为未提供，非法值返回错误信息。"""
+    raw = request.args.get(name)
+    if raw is None or str(raw).strip() == "":
+        return None, None
+    try:
+        return int(str(raw).strip()), None
+    except ValueError:
+        return None, f"{name} 必须是整数"
+
+
+def _parse_year_month_args():
+    """解析并校验 year / month 查询参数，返回 (year, month, error)。"""
+    year, error = _parse_int_arg("year")
+    if error:
+        return None, None, error
+    month, error = _parse_int_arg("month")
+    if error:
+        return None, None, error
+    if year is not None and not 1970 <= year <= 2999:
+        return None, None, "year 超出合理范围"
+    if month is not None and not 1 <= month <= 12:
+        return None, None, "month 必须在 1-12 之间"
+    return year, month, None
+
+
 @app.route("/stats")
 def get_stats():
-    """活动数据统计：支持按年度、月度、活动类型筛选。"""
+    """活动数据统计：支持按本地年度、月度、活动类型筛选。"""
     cache = load_cache()
     activities = cache.get("activities", [])
 
-    year = request.args.get("year", type=int)
-    month = request.args.get("month", type=int)
+    year, month, error = _parse_year_month_args()
+    if error:
+        return jsonify({"error": error}), 400
     activity_type = request.args.get("type")
 
-    def match(a):
-        if not a.get("start_date"):
-            return False
-        dt = datetime.fromisoformat(a["start_date"])
-        if year and dt.year != year:
-            return False
-        if month and dt.month != month:
-            return False
-        if activity_type and a.get("type") != activity_type:
-            return False
-        return True
+    filtered = _filter_activities_by_date(activities, year=year, month=month)
+    if activity_type:
+        filtered = [a for a in filtered if a.get("type") == activity_type]
 
-    filtered = [a for a in activities if match(a)]
-
-    # 汇总当前筛选条件的数据
     summary = aggregate_activities(filtered)
-
-    # 按年份统计
     by_year = group_activities_by(
-        filtered, lambda a: datetime.fromisoformat(a["start_date"]).year
+        filtered, lambda a: _activity_local_datetime(a).year
     )
-
-    # 按年月统计
     by_month = group_activities_by(
-        filtered,
-        lambda a: datetime.fromisoformat(a["start_date"]).strftime("%Y-%m"),
+        filtered, lambda a: _activity_local_datetime(a).strftime("%Y-%m")
     )
-
-    # 按活动类型统计
     by_type = group_activities_by(filtered, lambda a: a.get("type") or "Unknown")
 
     return jsonify(
@@ -1125,91 +1167,47 @@ def get_stats():
 
 @app.route("/chart")
 def chart():
-    """为前端图表返回时间序列数据。
-
-    请求参数:
-    - year: 可选，指定年份（int），则返回该年每月的聚合指标（1-12 月）
-    - metric: 可选，指标名，支持 `count`、`distance_km`、`moving_time_hours`、`elevation_gain_m`（默认 `distance_km`）
-
-    返回值除了当前选中的指标序列外，还包含每个时间点的全量指标序列，
-    方便前端 tooltip 一并展示距离、爬升等关键信息。
-    """
+    """按本地年月返回聚合指标，并让 year / month 同时作用于图表和汇总。"""
     cache = load_cache()
     activities = cache.get("activities", [])
 
-    year = request.args.get("year", type=int)
+    year, month, error = _parse_year_month_args()
+    if error:
+        return jsonify({"error": error}), 400
     metric = request.args.get("metric", "distance_km")
     if metric not in {"count", "distance_km", "moving_time_hours", "elevation_gain_m"}:
         return jsonify({"error": "unsupported metric"}), 400
 
     all_metrics = ["count", "distance_km", "moving_time_hours", "elevation_gain_m"]
+    filtered = _filter_activities_by_date(activities, year=year, month=month)
 
-    def has_date(a):
-        return bool(a.get("start_date"))
+    groups = {}
+    for activity in filtered:
+        key = _activity_local_datetime(activity).strftime("%Y-%m")
+        groups.setdefault(key, []).append(activity)
 
-    def per_label_acts():
-        """生成 (label, activities) 列表，并保持时间升序。"""
-        if year:
-            return [
-                (f"{year}-{m:02d}", [
-                    a for a in activities
-                    if has_date(a)
-                    and datetime.fromisoformat(a["start_date"]).year == year
-                    and datetime.fromisoformat(a["start_date"]).month == m
-                ])
-                for m in range(1, 13)
-            ]
+    if year is not None and month is None:
+        label_acts = [
+            (f"{year}-{m:02d}", groups.get(f"{year}-{m:02d}", []))
+            for m in range(1, 13)
+        ]
+    else:
+        label_acts = sorted(groups.items())
 
-        groups = {}
-        for a in activities:
-            if not has_date(a):
-                continue
-            key = datetime.fromisoformat(a["start_date"]).strftime("%Y-%m")
-            groups.setdefault(key, []).append(a)
-        return sorted(groups.items(), key=lambda x: x[0])
-
-    label_acts = per_label_acts()
     labels = [label for label, _ in label_acts]
-
     series = {m: [] for m in all_metrics}
     for _, acts in label_acts:
         agg = aggregate_activities(acts)
         for m in all_metrics:
             series[m].append(agg.get(m, 0))
 
-    if year:
-        summary = aggregate_activities([
-            a for a in activities
-            if has_date(a) and datetime.fromisoformat(a["start_date"]).year == year
-        ])
-    else:
-        summary = aggregate_activities([a for a in activities if has_date(a)])
-
     return jsonify({
+        "filters": {"year": year, "month": month},
         "labels": labels,
         "metric": metric,
         "series": series,
-        "summary": summary,
+        "summary": aggregate_activities(filtered),
     })
-
-
-def _filter_activities_by_date(activities, year=None, month=None):
-    """按年份 / 月份过滤活动。"""
-    def match(a):
-        sd = a.get("start_date")
-        if not sd:
-            return False
-        try:
-            dt = datetime.fromisoformat(sd)
-        except Exception:
-            return False
-        if year is not None and dt.year != year:
-            return False
-        if month is not None and dt.month != month:
-            return False
-        return True
-
-    return [a for a in activities if match(a)]
 
 
 @app.route("/chart/power-distribution")
@@ -1222,8 +1220,9 @@ def power_distribution():
     cache = load_cache()
     activities = cache.get("activities", [])
 
-    year = request.args.get("year", type=int)
-    month = request.args.get("month", type=int)
+    year, month, error = _parse_year_month_args()
+    if error:
+        return jsonify({"error": error}), 400
     filtered = _filter_activities_by_date(activities, year=year, month=month)
 
     items = [
@@ -1303,8 +1302,9 @@ def hr_zones():
     cache = load_cache()
     activities = cache.get("activities", [])
 
-    year = request.args.get("year", type=int)
-    month = request.args.get("month", type=int)
+    year, month, error = _parse_year_month_args()
+    if error:
+        return jsonify({"error": error}), 400
     filtered = _filter_activities_by_date(activities, year=year, month=month)
 
     items = [
@@ -1347,19 +1347,33 @@ def _is_ride(activity):
 
 @app.route("/chart/top-distance")
 def top_distance():
-    """返回里程排名前 20 的骑行活动。"""
+    """返回里程排名前 20 的骑行活动，支持按 year / month 过滤。"""
+    year, month, error = _parse_year_month_args()
+    if error:
+        return jsonify({"error": error}), 400
+
     cache = load_cache()
-    activities = [a for a in cache.get("activities", []) if _is_ride(a)]
-    top = sorted(activities, key=lambda a: a.get("distance") or 0, reverse=True)[:20]
+    activities = _filter_activities_by_date(
+        cache.get("activities", []), year=year, month=month
+    )
+    rides = [a for a in activities if _is_ride(a)]
+    top = sorted(rides, key=lambda a: a.get("distance") or 0, reverse=True)[:20]
     return jsonify([_activity_summary(a) for a in top])
 
 
 @app.route("/chart/top-elevation")
 def top_elevation():
-    """返回爬升排名前 20 的骑行活动。"""
+    """返回爬升排名前 20 的骑行活动，支持按 year / month 过滤。"""
+    year, month, error = _parse_year_month_args()
+    if error:
+        return jsonify({"error": error}), 400
+
     cache = load_cache()
-    activities = [a for a in cache.get("activities", []) if _is_ride(a)]
-    top = sorted(activities, key=lambda a: a.get("total_elevation_gain") or 0, reverse=True)[:20]
+    activities = _filter_activities_by_date(
+        cache.get("activities", []), year=year, month=month
+    )
+    rides = [a for a in activities if _is_ride(a)]
+    top = sorted(rides, key=lambda a: a.get("total_elevation_gain") or 0, reverse=True)[:20]
     return jsonify([_activity_summary(a) for a in top])
 
 
@@ -1371,6 +1385,7 @@ def _activity_summary(a):
         "type": a.get("type"),
         "sport_type": a.get("sport_type"),
         "start_date": a.get("start_date"),
+        "start_date_local": a.get("start_date_local"),
         "distance": a.get("distance"),
         "moving_time": a.get("moving_time"),
         "elapsed_time": a.get("elapsed_time"),
@@ -1384,22 +1399,15 @@ def _activity_summary(a):
 
 @app.route('/chart/years')
 def chart_years():
-    """返回活动中出现过的年份列表，降序排列。"""
+    """按本地开始时间返回活动年份列表，降序排列。"""
     cache = load_cache()
     activities = cache.get('activities', [])
-    years = set()
-    for a in activities:
-        sd = a.get('start_date')
-        if not sd:
-            continue
-        try:
-            y = datetime.fromisoformat(sd).year
-            years.add(y)
-        except Exception:
-            continue
-
-    sorted_years = sorted(years, reverse=True)
-    return jsonify({'years': sorted_years})
+    years = {
+        dt.year
+        for activity in activities
+        if (dt := _activity_local_datetime(activity)) is not None
+    }
+    return jsonify({'years': sorted(years, reverse=True)})
 
 
 # ============== 赛段（Segment）分析 ==============
@@ -1735,15 +1743,9 @@ def get_segment_effort_detail(effort_id):
 # ============== 训练负荷与状态 ==============
 
 def _activity_local_date(activity):
-    """按本地时区取得活动日期，用于训练日历聚合。"""
-    value = activity.get("start_date")
-    if not value:
-        return None
-    try:
-        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return dt.astimezone().date() if dt.tzinfo else dt.date()
-    except (TypeError, ValueError):
-        return None
+    """按本地开始时间取得活动日期，用于训练日历聚合。"""
+    dt = _activity_local_datetime(activity)
+    return dt.date() if dt else None
 
 
 def _calculate_activity_load(activity, ftp):
@@ -1768,6 +1770,7 @@ def _calculate_activity_load(activity, ftp):
         "name": activity.get("name") or "未命名活动",
         "type": activity.get("sport_type") or activity.get("type"),
         "start_date": activity.get("start_date"),
+        "start_date_local": activity.get("start_date_local"),
         "date": _activity_local_date(activity),
         "moving_time": moving_time or None,
         "normalized_power": normalized_power,

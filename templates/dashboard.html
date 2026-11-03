@@ -1089,6 +1089,35 @@
             return new Date(iso).toLocaleString('zh-CN');
         }
 
+        // Strava 的 start_date_local 表示当地墙上时间，但可能带 Z 或时区偏移，
+        // 直接 new Date() 会按时区换算，这里统一按字符串中的年月日时分秒解析。
+        function parseLocalWallClock(iso) {
+            if (!iso) return null;
+            const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+            if (!m) {
+                const fallback = new Date(iso);
+                return Number.isNaN(fallback.getTime()) ? null : fallback;
+            }
+            return new Date(
+                Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+                Number(m[4]), Number(m[5]), Number(m[6] || 0)
+            );
+        }
+
+        function activityStartDate(activity) {
+            if (!activity) return null;
+            if (activity.start_date_local) {
+                const local = parseLocalWallClock(activity.start_date_local);
+                if (local) return local;
+            }
+            return activity.start_date ? new Date(activity.start_date) : null;
+        }
+
+        function formatActivityDate(activity) {
+            const date = activityStartDate(activity);
+            return date ? date.toLocaleString('zh-CN') : '-';
+        }
+
         function formatDistance(meters) {
             if (meters === null || meters === undefined) return '-';
             return (meters / 1000).toFixed(2) + ' km';
@@ -1426,6 +1455,8 @@
 
         // 活动列表分页状态
         let allActivities = [];
+        let activitiesLoaded = false;
+        let activitiesSyncPromise = null;
         let activityPage = 1;
         let activityPageSize = 20;
         let lastAnalyzedActivityId = null;
@@ -1442,6 +1473,27 @@
         // 赛段分析状态
         let currentSegmentActivityId = null;
         let segmentChartInstances = {};
+
+        async function ensureActivitiesSynced(force = false) {
+            if (activitiesLoaded && !force) return allActivities;
+            if (activitiesSyncPromise) return activitiesSyncPromise;
+
+            activitiesSyncPromise = (async () => {
+                const res = await fetch('/activities');
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || '活动同步失败');
+                if (!Array.isArray(data)) throw new Error('活动数据格式无效');
+                allActivities = data;
+                activitiesLoaded = true;
+                return data;
+            })();
+
+            try {
+                return await activitiesSyncPromise;
+            } finally {
+                activitiesSyncPromise = null;
+            }
+        }
 
         function buildChartControls() {
             return `
@@ -1585,7 +1637,13 @@
 
             setHtml('图表分析', buildChartControls());
 
-            // 同时加载运动员信息（已做后端缓存，不会频繁调用 Strava API）
+            try {
+                await ensureActivitiesSynced();
+            } catch (err) {
+                setError('图表分析', '活动同步失败: ' + err.message);
+                return;
+            }
+
             await renderAthleteProfileSection();
 
             // 动态填充 Year 选项
@@ -1628,8 +1686,8 @@
                 const mainUrl = '/chart' + (metricQs.length ? ('?' + metricQs.join('&')) : '');
                 const powerUrl = '/chart/power-distribution' + (baseQs.length ? ('?' + baseQs.join('&')) : '');
                 const hrUrl = '/chart/hr-zones' + (baseQs.length ? ('?' + baseQs.join('&')) : '');
-                const topElevationUrl = '/chart/top-elevation';
-                const topDistanceUrl = '/chart/top-distance';
+                const topElevationUrl = '/chart/top-elevation' + (baseQs.length ? ('?' + baseQs.join('&')) : '');
+                const topDistanceUrl = '/chart/top-distance' + (baseQs.length ? ('?' + baseQs.join('&')) : '');
 
                 const [mainRes, powerRes, hrRes, topElevationRes, topDistanceRes] = await Promise.all([
                     fetch(mainUrl),
@@ -1997,7 +2055,7 @@
                 `平均速度: ${formatSpeed(activity.average_speed)}`,
                 `平均心率: ${formatHeartRate(activity.average_heartrate)}`,
                 `最大功率: ${formatWatts(activity.average_watts)}`,
-                `开始时间: ${formatDate(activity.start_date)}`
+                `开始时间: ${formatActivityDate(activity)}`
             ];
         }
 
@@ -2507,7 +2565,7 @@
                     <div>
                         <div class="analysis-title">${escapeHtml(activity.name)}</div>
                         <div class="analysis-meta">
-                            <span>${formatDate(activity.start_date)}</span>
+                            <span>${formatActivityDate(activity)}</span>
                             <span>${formatDistance(activity.distance)}</span>
                             <span>${formatTime(activity.moving_time)}</span>
                             <span>${formatElevation(activity.total_elevation_gain)}</span>
@@ -2578,12 +2636,11 @@
             lastAnalyzedActivityId = activityId;
 
             try {
-                const [activityRes, streamsRes] = await Promise.all([
-                    fetch('/activities'),
+                const [activities, streamsRes] = await Promise.all([
+                    ensureActivitiesSynced(),
                     fetch(`/activities/${activityId}/streams`)
                 ]);
 
-                const activities = activityRes.ok ? await activityRes.json() : [];
                 const streamsData = streamsRes.ok ? await streamsRes.json() : null;
 
                 if (!streamsRes.ok) {
@@ -2756,7 +2813,7 @@
             const prHtml = bestEffort ? `
                 <div class="metric-highlight" style="margin-top:0;margin-bottom:16px;">
                     <div class="card"><div class="label">历史最佳用时</div><div class="value">${formatTime(bestEffort.elapsed_time)}</div></div>
-                    <div class="card"><div class="label">最佳日期</div><div class="value">${formatDate(bestEffort.start_date)}</div></div>
+                    <div class="card"><div class="label">最佳日期</div><div class="value">${formatActivityDate(bestEffort)}</div></div>
                     <div class="card"><div class="label">总尝试次数</div><div class="value">${efforts.length}</div></div>
                 </div>
             ` : '';
@@ -2764,7 +2821,7 @@
             // 单次 effort 列表
             const effortRows = efforts.slice().reverse().map(e => `
                 <div class="effort-row" onclick="analyzeSegmentEffort('${e.effort_id}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}', '${e.segment_id}')">
-                    <div class="date">${formatDate(e.start_date)}</div>
+                    <div class="date">${formatActivityDate(e)}</div>
                     <div class="stats">
                         <span>⏱️ ${formatTime(e.elapsed_time)}</span>
                         <span>🚴 ${formatTime(e.moving_time)}</span>
@@ -2838,10 +2895,10 @@
         }
 
         function renderSegmentTrendCharts(data) {
-            const efforts = (data.efforts || []).slice().sort((a, b) => new Date(a.start_date) - new Date(b.start_date));
+            const efforts = (data.efforts || []).slice().sort((a, b) => (activityStartDate(a) || 0) - (activityStartDate(b) || 0));
             const labels = efforts.map(e => {
-                const d = new Date(e.start_date);
-                return `${d.getMonth() + 1}/${d.getDate()}`;
+                const d = activityStartDate(e);
+                return d ? `${d.getMonth() + 1}/${d.getDate()}` : '-';
             });
 
             // 耗时趋势
@@ -3175,7 +3232,7 @@
                     : (a.load_method === 'suffer_score' ? 'Strava 强度评分' : '无有效数据');
                 return `
                     <tr>
-                        <td>${formatDate(a.start_date)}</td>
+                        <td>${formatActivityDate(a)}</td>
                         <td>${escapeHtml(a.name)}</td>
                         <td>${escapeHtml(a.type)}</td>
                         <td class="text-right">${formatTime(a.moving_time)}</td>
@@ -3253,6 +3310,7 @@
             if (String(trainingFtp).trim()) params.set('ftp', String(trainingFtp).trim());
 
             try {
+                await ensureActivitiesSynced();
                 const res = await fetch('/training-load?' + params.toString());
                 const data = await res.json();
                 if (!res.ok) {
@@ -3403,14 +3461,24 @@
             });
         }
 
+        function getActivityLocalYearMonth(activity) {
+            const localValue = activity.start_date_local;
+            const localMatch = localValue && localValue.match(/^(\d{4})-(\d{2})/);
+            if (localMatch) return { year: Number(localMatch[1]), month: Number(localMatch[2]) };
+
+            if (!activity.start_date) return null;
+            const date = new Date(activity.start_date);
+            if (Number.isNaN(date.getTime())) return null;
+            return { year: date.getFullYear(), month: date.getMonth() + 1 };
+        }
+
         function getFilterOptions(activities) {
             const years = new Set();
             const types = new Set();
             const sportTypes = new Set();
             activities.forEach(a => {
-                if (a.start_date) {
-                    try { years.add(new Date(a.start_date).getFullYear()); } catch (e) {}
-                }
+                const date = getActivityLocalYearMonth(a);
+                if (date) years.add(date.year);
                 if (a.type) types.add(a.type);
                 if (a.sport_type) sportTypes.add(a.sport_type);
             });
@@ -3423,9 +3491,9 @@
 
         function getFilteredActivities() {
             return allActivities.filter(a => {
-                const date = a.start_date ? new Date(a.start_date) : null;
-                if (activityFilters.year && date && date.getFullYear() !== parseInt(activityFilters.year, 10)) return false;
-                if (activityFilters.month && date && (date.getMonth() + 1) !== parseInt(activityFilters.month, 10)) return false;
+                const date = getActivityLocalYearMonth(a);
+                if (activityFilters.year && (!date || date.year !== parseInt(activityFilters.year, 10))) return false;
+                if (activityFilters.month && (!date || date.month !== parseInt(activityFilters.month, 10))) return false;
                 if (activityFilters.type && a.type !== activityFilters.type) return false;
                 if (activityFilters.sportType && a.sport_type !== activityFilters.sportType) return false;
                 if (activityFilters.keyword) {
@@ -3520,7 +3588,7 @@
                     <td>${escapeHtml(a.name)}</td>
                     <td>${escapeHtml(a.type)}</td>
                     <td>${escapeHtml(a.sport_type)}</td>
-                    <td>${formatDate(a.start_date)}</td>
+                    <td>${formatActivityDate(a)}</td>
                     <td class="text-right">${formatDistance(a.distance)}</td>
                     <td class="text-right">${formatTime(a.moving_time)}</td>
                     <td class="text-right">${formatElevation(a.total_elevation_gain)}</td>
@@ -3641,21 +3709,14 @@
             setLoading('活动列表（正在同步，请稍候）...');
 
             try {
-                const res = await fetch('/activities');
-                const data = await res.json();
-                if (!res.ok) {
-                    setError('活动列表', '获取失败: ' + (data.error || '未知错误'));
-                    return;
-                }
-
-                if (!Array.isArray(data) || data.length === 0) {
+                const data = await ensureActivitiesSynced(true);
+                if (data.length === 0) {
                     pageTitleEl.textContent = '活动列表';
                     resultEl.textContent = '暂无活动数据';
                     resultEl.classList.add('empty');
                     return;
                 }
 
-                allActivities = data;
                 renderActivityPage(restoreScroll);
             } catch (err) {
                 setError('活动列表', '请求出错: ' + err.message);
