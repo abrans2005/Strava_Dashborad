@@ -1,3 +1,4 @@
+import hashlib
 import json
 import math
 import os
@@ -22,6 +23,8 @@ app = Flask(__name__)
 DEFAULT_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID", "").strip()
 DEFAULT_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "").strip()
 PORT = int(os.environ.get("PORT", "5001"))
+# 调试模式默认关闭，需显式开启：FLASK_DEBUG=1
+DEBUG = os.environ.get("FLASK_DEBUG", "").strip() in ("1", "true", "True")
 REDIRECT_URI = f"http://127.0.0.1:{PORT}/authorization"
 SCOPE = "read,activity:read,profile:read_all"
 TOKEN_REFRESH_BUFFER_SECONDS = 60
@@ -314,6 +317,21 @@ def dashboard():
     if not session_state["client"]:
         return redirect("/?error=请先完成授权")
     return render_template("dashboard.html")
+
+
+@app.route("/sync-status")
+def sync_status():
+    """返回本地缓存的同步状态，不触发任何 Strava 请求。"""
+    if not session_state.get("client"):
+        return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
+
+    cache = load_cache()
+    return jsonify({
+        "last_sync_time": cache.get("last_sync_time"),
+        "last_full_sync_time": cache.get("last_full_sync_time"),
+        "activity_count": len(cache.get("activities", [])),
+        "needs_full_sync": bool(cache.get("needs_full_sync")),
+    })
 
 
 def to_number(value):
@@ -926,6 +944,54 @@ def activity_to_dict(a):
     }
 
 
+# 活动对象的全部可选字段，供 /activities?fields= 做投影
+ACTIVITY_FIELDS = (
+    "id", "name", "type", "sport_type", "start_date", "start_date_local",
+    "distance", "moving_time", "elapsed_time", "total_elevation_gain",
+    "average_speed", "max_speed", "average_cadence", "average_heartrate",
+    "max_heartrate", "suffer_score", "has_heartrate", "average_watts",
+    "weighted_average_watts", "max_watts", "kilojoules",
+)
+
+
+def _parse_activity_fields(raw):
+    """解析 fields 查询参数。
+
+    返回 None 表示不投影（全字段）；否则返回按标准顺序排列、且一定包含 id 的字段列表。
+    非法字段抛 ValueError，由路由转成 400。
+    """
+    if raw is None or not str(raw).strip():
+        return None
+
+    requested = [item.strip() for item in str(raw).split(",") if item.strip()]
+    unknown = [item for item in requested if item not in ACTIVITY_FIELDS]
+    if unknown:
+        raise ValueError("不支持的字段: " + ", ".join(unknown))
+
+    wanted = set(requested)
+    ordered = [field for field in ACTIVITY_FIELDS if field in wanted]
+    if "id" not in ordered:
+        ordered.insert(0, "id")
+    return ordered
+
+
+def _activities_etag(activities, fields):
+    """按内容生成 ETag：条数、字段投影 + 关键字段指纹。
+
+    不使用同步时间，避免每次增量同步都让浏览器缓存失效。
+    """
+    hasher = hashlib.md5()
+    field_key = ",".join(fields) if fields else "all"
+    hasher.update(f"n={len(activities)};f={field_key};".encode("utf-8"))
+    for activity in activities:
+        fingerprint = "|".join(str(activity.get(key)) for key in (
+            "id", "name", "distance", "moving_time",
+            "weighted_average_watts", "suffer_score",
+        ))
+        hasher.update((fingerprint + ";").encode("utf-8"))
+    return hasher.hexdigest()
+
+
 def _activity_local_datetime(activity):
     """优先使用 Strava 本地开始时间，旧缓存回退到 UTC 转服务器本地时间。"""
     for field in ("start_date_local", "start_date"):
@@ -1087,16 +1153,43 @@ def group_activities_by(activities, key_func):
 
 @app.route("/activities")
 def get_activities():
-    """获取活动列表：首次全量，后续增量，并触发每 2 小时自动同步。"""
+    """获取活动列表：首次全量，后续增量，并触发每 2 小时自动同步。
+
+    支持 fields= 字段投影，并通过 ETag 做协商缓存：数据未变化时返回 304，
+    浏览器直接复用本地副本，避免重复传输整份活动列表。
+    """
     if not session_state.get("client"):
         return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
 
     try:
+        fields = _parse_activity_fields(request.args.get("fields"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    try:
         force_full = request.args.get("force", "0") == "1"
         activities = sync_activities(force_full=force_full)
-        return jsonify(activities)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+    etag = _activities_etag(activities, fields)
+    if request.if_none_match.contains(etag):
+        return "", 304, {
+            "ETag": f'"{etag}"',
+            "Cache-Control": "private, no-cache",
+        }
+
+    payload = activities
+    if fields is not None:
+        payload = [
+            {field: activity.get(field) for field in fields}
+            for activity in activities
+        ]
+
+    response = jsonify(payload)
+    response.set_etag(etag)
+    response.headers["Cache-Control"] = "private, no-cache"
+    return response
 
 
 def _filter_activities_by_date(activities, year=None, month=None):
@@ -2239,4 +2332,4 @@ if __name__ == "__main__":
     sync_thread = threading.Thread(target=auto_sync_loop, daemon=True)
     sync_thread.start()
 
-    app.run(host="127.0.0.1", port=PORT, debug=True, use_reloader=False)
+    app.run(host="127.0.0.1", port=PORT, debug=DEBUG, use_reloader=False)
