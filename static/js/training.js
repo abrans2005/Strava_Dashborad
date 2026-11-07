@@ -1,15 +1,10 @@
 /* training.js — 训练负荷看板（由 templates/dashboard.html 拆分） */
 
 // ============== 训练负荷与状态看板 ==============
-        let trainingChartInstances = {};
-        let trainingDays = 90;
         let trainingFtp = '';
 
         function destroyTrainingCharts() {
-            Object.values(trainingChartInstances).forEach(chart => {
-                if (chart) chart.destroy();
-            });
-            trainingChartInstances = {};
+            ChartRegistry.destroyGroup('training:');
         }
 
         function formatLoad(value) {
@@ -59,10 +54,8 @@
             return `
                 <div class="filter-bar">
                     <div class="filter-group">
-                        <label for="training-days">趋势范围</label>
-                        <select id="training-days">
-                            ${[30, 90, 180, 365].map(days => `<option value="${days}" ${trainingDays === days ? 'selected' : ''}>近 ${days} 天</option>`).join('')}
-                        </select>
+                        <label>趋势范围</label>
+                        <span style="font-size:13px;color:#5a636e;padding:8px 0;">跟随顶部全局时间范围（当前 ${periodDays()} 天）</span>
                     </div>
                     <div class="filter-group">
                         <label for="training-ftp">FTP (W)</label>
@@ -116,11 +109,12 @@
 
         async function loadTrainingDashboard(btn) {
             if (btn) setActiveMenu(btn);
-            currentPageReload = () => loadTrainingDashboard(btn);
             setLoading('训练负荷与状态');
             destroyTrainingCharts();
 
-            const params = new URLSearchParams({ days: String(trainingDays) });
+            // 趋势范围由全局时间范围折算成天数；FTP 记录在 URL 参数里
+            trainingFtp = currentRoute ? (currentRoute.params.ftp || '') : trainingFtp;
+            const params = new URLSearchParams({ days: String(periodDays()) });
             if (String(trainingFtp).trim()) params.set('ftp', String(trainingFtp).trim());
 
             try {
@@ -141,8 +135,8 @@
         }
 
         function applyTrainingFilters() {
-            trainingDays = parseInt(document.getElementById('training-days').value, 10);
             trainingFtp = document.getElementById('training-ftp').value.trim();
+            replaceParams({ ftp: trainingFtp });
             loadTrainingDashboard(null);
         }
 
@@ -150,7 +144,7 @@
             const daily = data.daily || [];
             const labels = daily.map(item => item.date.slice(5));
             const trendCtx = document.getElementById('trainingTrendCanvas').getContext('2d');
-            trainingChartInstances.trend = new Chart(trendCtx, {
+            createChart('training:trend', trendCtx, {
                 data: {
                     labels,
                     datasets: [
@@ -173,7 +167,7 @@
             });
 
             const tsbCtx = document.getElementById('trainingTsbCanvas').getContext('2d');
-            trainingChartInstances.tsb = new Chart(tsbCtx, {
+            createChart('training:tsb', tsbCtx, {
                 type: 'line',
                 data: {
                     labels,
@@ -201,7 +195,7 @@
 
             const weekly = data.weekly || [];
             const weeklyCtx = document.getElementById('trainingWeeklyCanvas').getContext('2d');
-            trainingChartInstances.weekly = new Chart(weeklyCtx, {
+            createChart('training:weekly', weeklyCtx, {
                 type: 'bar',
                 data: {
                     labels: weekly.map(item => item.label),

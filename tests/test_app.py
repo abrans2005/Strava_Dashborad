@@ -147,6 +147,44 @@ class TestChartEndpoint:
         assert api.get("/chart?year=3000").status_code == 400
 
 
+class TestDateRangeArgs:
+    """start/end 日期范围筛选（全局时间范围的后端支持）。"""
+
+    def test_chart_range_filters_and_labels(self, api):
+        body = api.get("/chart?start=2026-10-01&end=2026-10-31").get_json()
+        assert body["labels"] == ["2026-10"]
+        assert body["filters"]["start"] == "2026-10-01"
+        assert body["filters"]["end"] == "2026-10-31"
+        assert body["summary"]["count"] == 2
+
+    def test_chart_range_across_months(self, api):
+        body = api.get("/chart?start=2026-09-01&end=2026-10-31").get_json()
+        assert body["labels"] == ["2026-09", "2026-10"]
+
+    def test_invalid_start_rejected(self, api):
+        assert api.get("/chart?start=bad").status_code == 400
+
+    def test_reversed_range_rejected(self, api):
+        assert api.get("/chart?start=2026-10-10&end=2026-10-01").status_code == 400
+
+    def test_top_distance_with_range(self, api):
+        resp = api.get("/chart/top-distance?start=2026-10-01&end=2026-10-31")
+        assert resp.status_code == 200
+        # 未指定运动类型时保持“骑行”口径，10 月仅一条骑行
+        assert len(resp.get_json()) == 1
+
+    def test_map_routes_with_range(self, api, route_stubs):
+        route_stubs.set_fetch(lambda aid: ([[30.0, 120.0], [30.1, 120.1]], [0.0, 1.0], [0.0, 1.0]))
+        body = api.get("/map/routes?start=2026-10-01&end=2026-10-31&fetch=5").get_json()
+        assert body["stats"]["total"] == 2
+        assert body["filters"]["start"] == "2026-10-01"
+
+    def test_training_load_accepts_arbitrary_days(self, api):
+        resp = api.get("/training-load?days=311")
+        assert resp.status_code == 200
+        assert api.get("/training-load?days=0").status_code == 400
+
+
 # ---------- /athlete ----------
 
 class TestAthleteEndpoint:

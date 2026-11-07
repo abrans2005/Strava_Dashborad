@@ -65,26 +65,23 @@ function buildAnalysisPanel(activity, data) {
                     </div>
                 </div>
                 <div style="text-align:center;margin-top:24px;">
-                    <button class="btn-primary" onclick="analyzeSegments('${activity.id}', '${escapeHtml(activity.name).replace(/'/g, "\\'")}')">赛段分析</button>
+                    <button class="btn-primary" onclick="openSegments('${activity.id}', '${escapeHtml(activity.name).replace(/'/g, "\\'")}')">赛段分析</button>
                     <button class="btn-back" onclick="backToActivityList()">返回列表</button>
                 </div>
             `;
         }
 
+        // 列表行「分析」入口：状态进 URL，可后退/分享
+        function openActivityAnalysis(activityId) {
+            navigate('activity/' + activityId);
+        }
+
         function backToActivityList() {
-            const btn = document.querySelector('.menu-item[onclick*="loadActivities"]');
-            if (!btn) return;
-            if (lastAnalyzedActivityId && allActivities.length) {
-                const idx = allActivities.findIndex(a => String(a.id) === String(lastAnalyzedActivityId));
-                if (idx >= 0) {
-                    activityPage = Math.floor(idx / activityPageSize) + 1;
-                }
-            }
-            loadActivities(btn, true);
+            // 回到离开活动列表前的筛选与页码；focus 让列表定位到刚分析过的活动所在页
+            navigate('activities', { ...lastListParams.activities, focus: lastAnalyzedActivityId || '' });
         }
 
         async function analyzeActivity(activityId) {
-            currentPageReload = () => analyzeActivity(activityId);
             setLoading('活动分析');
             lastAnalyzedActivityId = activityId;
 

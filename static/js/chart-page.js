@@ -274,6 +274,8 @@ function buildZonesPanel(zonesData) {
                 if (!Array.isArray(data)) throw new Error('活动数据格式无效');
                 allActivities = data;
                 activitiesLoaded = true;
+                // 全局筛选栏的运动类型选项依赖活动数据
+                populateGlobalSportOptions();
                 return data;
             })();
 
@@ -285,58 +287,21 @@ function buildZonesPanel(zonesData) {
         }
 
         function buildChartControls() {
-            const filterOptions = getFilterOptions(allActivities);
-            // 后端同时匹配 sport_type 与 type，选项取两者并集，兼容缺字段的旧数据
-            const sportTypeOptions = Array.from(
-                new Set([...filterOptions.sportTypes, ...filterOptions.types])
-            ).sort().map(
-                t => `<option value="${escapeHtml(t)}" ${chartSportType === t ? 'selected' : ''}>${escapeHtml(t)}</option>`
-            ).join('');
+            // 年份/月份/运动类型已由顶部全局筛选栏接管，这里只保留图表自身指标
+            const metricValue = currentRoute && currentRoute.params.metric ? currentRoute.params.metric : 'distance_km';
 
             return `
                 <div id="athlete-profile-section"></div>
                 <div class="filter-bar">
                     <div class="filter-group">
-                        <label for="chart-year">年份</label>
-                        <select id="chart-year">
-                            <option value="">全部</option>
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label for="chart-month">月份</label>
-                        <select id="chart-month">
-                            <option value="">全部</option>
-                            <option value="1">1 月</option>
-                            <option value="2">2 月</option>
-                            <option value="3">3 月</option>
-                            <option value="4">4 月</option>
-                            <option value="5">5 月</option>
-                            <option value="6">6 月</option>
-                            <option value="7">7 月</option>
-                            <option value="8">8 月</option>
-                            <option value="9">9 月</option>
-                            <option value="10">10 月</option>
-                            <option value="11">11 月</option>
-                            <option value="12">12 月</option>
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label for="chart-sport-type">运动类型</label>
-                        <select id="chart-sport-type">
-                            <option value="">全部</option>
-                            ${sportTypeOptions}
-                        </select>
-                    </div>
-                    <div class="filter-group">
                         <label for="chart-metric">指标</label>
                         <select id="chart-metric">
-                            <option value="count">运动次数</option>
-                            <option value="distance_km" selected>距离 (km)</option>
-                            <option value="moving_time_hours">移动时长 (h)</option>
-                            <option value="elevation_gain_m">爬升 (m)</option>
+                            <option value="count" ${metricValue === 'count' ? 'selected' : ''}>运动次数</option>
+                            <option value="distance_km" ${metricValue === 'distance_km' ? 'selected' : ''}>距离 (km)</option>
+                            <option value="moving_time_hours" ${metricValue === 'moving_time_hours' ? 'selected' : ''}>移动时长 (h)</option>
+                            <option value="elevation_gain_m" ${metricValue === 'elevation_gain_m' ? 'selected' : ''}>爬升 (m)</option>
                         </select>
                     </div>
-                    <button class="btn-primary" id="chart-run">查询</button>
                 </div>
                 <div id="chart-summary" class="summary-cards"></div>
                 <div class="chart-card">
@@ -437,7 +402,6 @@ function buildZonesPanel(zonesData) {
 
         async function loadChart(btn) {
             setActiveMenu(btn);
-            currentPageReload = () => loadChart(btn);
             setLoading('图表分析');
 
             try {
@@ -447,49 +411,19 @@ function buildZonesPanel(zonesData) {
                 return;
             }
 
-            // 运动类型选项依赖活动数据，需在同步完成后再渲染筛选栏
+            populateGlobalSportOptions();
             setHtml('图表分析', buildChartControls());
 
             await renderAthleteProfileSection();
 
-            // 动态填充 Year 选项
-            try {
-                const yearsRes = await fetch('/chart/years');
-                const yearsData = await yearsRes.json();
-                if (Array.isArray(yearsData.years)) {
-                    const sel = document.getElementById('chart-year');
-                    yearsData.years.forEach(y => {
-                        const opt = document.createElement('option');
-                        opt.value = String(y);
-                        opt.textContent = String(y) + ' 年';
-                        sel.appendChild(opt);
-                    });
-                }
-            } catch (e) {
-                // ignore failure, keep default
-            }
-
-            // 选项可能随活动数据变化，已选类型失效时回退到“全部”
-            const chartSportSelect = document.getElementById('chart-sport-type');
-            if (
-                chartSportSelect && chartSportType &&
-                !Array.from(chartSportSelect.options).some(o => o.value === chartSportType)
-            ) {
-                chartSportType = '';
-                chartSportSelect.value = '';
-            }
-
-            document.getElementById('chart-run').addEventListener('click', async () => {
-                const year = document.getElementById('chart-year').value;
-                const month = document.getElementById('chart-month').value;
-                const sportType = document.getElementById('chart-sport-type').value;
-                const metric = document.getElementById('chart-metric').value;
-                chartSportType = sportType;
-                await fetchAndRenderStats(year, month, metric, sportType);
+            // 指标切换：只更新 URL 参数与主图，不整页重载
+            document.getElementById('chart-metric').addEventListener('change', e => {
+                replaceParams({ metric: e.target.value });
+                fetchAndRenderStats(e.target.value);
             });
 
             // 默认立即查询一次
-            await fetchAndRenderStats('', '', 'distance_km', chartSportType);
+            await fetchAndRenderStats(currentRoute.params.metric || 'distance_km');
         }
 
         function updateTopChartTitles(sportType) {
@@ -503,21 +437,18 @@ function buildZonesPanel(zonesData) {
             }
         }
 
-        async function fetchAndRenderStats(year, month, metric, sportType = chartSportType) {
+        async function fetchAndRenderStats(metric) {
             try {
-                let baseQs = [];
-                if (year) baseQs.push('year=' + encodeURIComponent(year));
-                if (month) baseQs.push('month=' + encodeURIComponent(month));
-                if (sportType) baseQs.push('sport_type=' + encodeURIComponent(sportType));
+                // 时间范围与运动类型来自顶部全局筛选栏（start/end + sport_type）
+                const baseQs = globalDateQuery();
 
-                let metricQs = [...baseQs];
-                if (metric) metricQs.push('metric=' + encodeURIComponent(metric));
+                const metricQs = [...baseQs, 'metric=' + encodeURIComponent(metric)];
 
-                const mainUrl = '/chart' + (metricQs.length ? ('?' + metricQs.join('&')) : '');
-                const powerUrl = '/chart/power-distribution' + (baseQs.length ? ('?' + baseQs.join('&')) : '');
-                const hrUrl = '/chart/hr-zones' + (baseQs.length ? ('?' + baseQs.join('&')) : '');
-                const topElevationUrl = '/chart/top-elevation' + (baseQs.length ? ('?' + baseQs.join('&')) : '');
-                const topDistanceUrl = '/chart/top-distance' + (baseQs.length ? ('?' + baseQs.join('&')) : '');
+                const mainUrl = '/chart?' + metricQs.join('&');
+                const powerUrl = '/chart/power-distribution?' + baseQs.join('&');
+                const hrUrl = '/chart/hr-zones?' + baseQs.join('&');
+                const topElevationUrl = '/chart/top-elevation?' + baseQs.join('&');
+                const topDistanceUrl = '/chart/top-distance?' + baseQs.join('&');
 
                 const [mainRes, powerRes, hrRes, topElevationRes, topDistanceRes] = await Promise.all([
                     fetch(mainUrl),
@@ -540,7 +471,7 @@ function buildZonesPanel(zonesData) {
                     return;
                 }
 
-                updateTopChartTitles(sportType);
+                updateTopChartTitles(globalFilters.sport);
 
                 const summaryEl = document.getElementById('chart-summary');
                 if (data.summary) {
@@ -573,10 +504,7 @@ function buildZonesPanel(zonesData) {
 
                 if (!labels.length || !values.length) {
                     // 该筛选组合下没有数据：只清空主图，其余图表继续渲染，避免整页报错
-                    if (chartInstance) {
-                        chartInstance.destroy();
-                        chartInstance = null;
-                    }
+                    ChartRegistry.destroy('main');
                     const emptyCtx = document.getElementById('chartCanvas').getContext('2d');
                     emptyCtx.clearRect(0, 0, emptyCtx.canvas.width, emptyCtx.canvas.height);
                 } else {

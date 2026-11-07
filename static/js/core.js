@@ -210,13 +210,9 @@ let lastAnalyzedActivityId = null;
 
 // 活动列表筛选条件
 let activityFilters = {
-    year: '',
-    month: '',
     type: '',
-    sportType: '',
     keyword: '',
 };
 
 // 赛段分析状态
 let currentSegmentActivityId = null;
-let segmentChartInstances = {};

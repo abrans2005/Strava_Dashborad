@@ -2,10 +2,7 @@
 
 // ============== 赛段分析 ==============
         function destroySegmentCharts() {
-            Object.values(segmentChartInstances).forEach(chart => {
-                if (chart) chart.destroy();
-            });
-            segmentChartInstances = {};
+            ChartRegistry.destroyGroup('segment:');
         }
 
         function formatLatLng(latlng) {
@@ -13,6 +10,24 @@
             const lat = Number(latlng[0]).toFixed(5);
             const lng = Number(latlng[1]).toFixed(5);
             return `${lat}, ${lng}`;
+        }
+
+
+        // —— 路由入口：页面状态进 URL，支持后退与分享 ——
+        function openSegments(activityId, activityName) {
+            navigate('segments/' + activityId, { name: activityName });
+        }
+
+        function openSegmentHistory(segmentId, segmentName) {
+            navigate('segment-history/' + segmentId, { name: segmentName });
+        }
+
+        function openSegmentEffort(effortId, segmentName, segmentId) {
+            navigate('segment-effort/' + effortId, { name: segmentName, segment: segmentId });
+        }
+
+        function backToSegmentList() {
+            navigate('segments/' + (currentSegmentActivityId || ''));
         }
 
         async function analyzeSegments(activityId, activityName) {
@@ -61,7 +76,7 @@
             }
 
             const cards = segments.map(s => `
-                <div class="segment-card" onclick="loadSegmentHistory('${s.segment_id}', '${escapeHtml(s.name).replace(/'/g, "\\'")}')">
+                <div class="segment-card" onclick="openSegmentHistory('${s.segment_id}', '${escapeHtml(s.name).replace(/'/g, "\\'")}')">
                     <div class="name">${escapeHtml(s.name)}</div>
                     <div class="meta">
                         <span>📏 ${formatDistance(s.distance)}</span>
@@ -90,7 +105,7 @@
                 if (!res.ok) {
                     setHtml('赛段历史趋势', `
                         <div class="segment-back">
-                            <button class="btn-back" onclick="analyzeSegments('${currentSegmentActivityId || ''}', '')">返回赛段列表</button>
+                            <button class="btn-back" onclick="backToSegmentList()">返回赛段列表</button>
                         </div>
                         <div style="color:#c00;padding:20px 0;text-align:center;">
                             ${escapeHtml(data.error || '获取失败')}
@@ -103,7 +118,7 @@
             } catch (err) {
                 setHtml('赛段历史趋势', `
                     <div class="segment-back">
-                        <button class="btn-back" onclick="analyzeSegments('${currentSegmentActivityId || ''}', '')">返回赛段列表</button>
+                        <button class="btn-back" onclick="backToSegmentList()">返回赛段列表</button>
                     </div>
                     <div style="color:#c00;padding:20px 0;text-align:center;">
                         请求出错：${escapeHtml(err.message)}
@@ -119,7 +134,7 @@
             if (!efforts.length) {
                 setHtml(title, `
                     <div class="segment-back">
-                        <button class="btn-back" onclick="analyzeSegments('${currentSegmentActivityId || ''}', '')">返回赛段列表</button>
+                        <button class="btn-back" onclick="backToSegmentList()">返回赛段列表</button>
                     </div>
                     <div style="padding:40px 0;text-align:center;color:#888;">暂无该赛段的历史数据。</div>
                 `);
@@ -143,7 +158,7 @@
 
             // 单次 effort 列表
             const effortRows = efforts.slice().reverse().map(e => `
-                <div class="effort-row" onclick="analyzeSegmentEffort('${e.effort_id}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}', '${e.segment_id}')">
+                <div class="effort-row" onclick="openSegmentEffort('${e.effort_id}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}', '${e.segment_id}')">
                     <div class="date">${formatActivityDate(e)}</div>
                     <div class="stats">
                         <span>⏱️ ${formatTime(e.elapsed_time)}</span>
@@ -181,7 +196,7 @@
 
             setHtml(title, `
                 <div class="segment-back">
-                    <button class="btn-back" onclick="analyzeSegments('${currentSegmentActivityId || ''}', '')">返回赛段列表</button>
+                    <button class="btn-back" onclick="backToSegmentList()">返回赛段列表</button>
                 </div>
                 ${prHtml}
                 <div class="analysis-grid">
@@ -210,7 +225,7 @@
                 </div>
                 ${seasonalTable}
                 <div style="text-align:center;margin-top:20px;">
-                    <button class="btn-back" onclick="analyzeSegments('${currentSegmentActivityId || ''}', '')">返回赛段列表</button>
+                    <button class="btn-back" onclick="backToSegmentList()">返回赛段列表</button>
                 </div>
             `);
 
@@ -226,7 +241,7 @@
 
             // 耗时趋势
             const timeCtx = document.getElementById('segmentTimeCanvas').getContext('2d');
-            segmentChartInstances.time = new Chart(timeCtx, {
+            createChart('segment:time', timeCtx, {
                 type: 'line',
                 data: {
                     labels: labels,
@@ -272,7 +287,7 @@
             const hasWatts = efforts.some(e => e.average_watts !== null && e.average_watts !== undefined);
             if (hasWatts) {
                 const powerCtx = document.getElementById('segmentPowerCanvas').getContext('2d');
-                segmentChartInstances.power = new Chart(powerCtx, {
+                createChart('segment:power', powerCtx, {
                     type: 'line',
                     data: {
                         labels: labels,
@@ -305,7 +320,7 @@
             const seasonalKeys = Object.keys(byYearMonth).sort();
             if (seasonalKeys.length > 0) {
                 const seasonPowerCtx = document.getElementById('segmentSeasonPowerCanvas').getContext('2d');
-                segmentChartInstances.seasonPower = new Chart(seasonPowerCtx, {
+                createChart('segment:seasonPower', seasonPowerCtx, {
                     type: 'bar',
                     data: {
                         labels: seasonalKeys,
@@ -331,7 +346,7 @@
                 });
 
                 const seasonTimeCtx = document.getElementById('segmentSeasonTimeCanvas').getContext('2d');
-                segmentChartInstances.seasonTime = new Chart(seasonTimeCtx, {
+                createChart('segment:seasonTime', seasonTimeCtx, {
                     type: 'bar',
                     data: {
                         labels: seasonalKeys,
@@ -368,7 +383,7 @@
                 if (!res.ok) {
                     setHtml('赛段单次分析', `
                         <div class="segment-back">
-                            <button class="btn-back" onclick="loadSegmentHistory('${segmentId || ''}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}')">返回赛段趋势</button>
+                            <button class="btn-back" onclick="openSegmentHistory('${segmentId || ''}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}')">返回赛段趋势</button>
                         </div>
                         <div style="color:#c00;padding:20px 0;text-align:center;">
                             ${escapeHtml(data.error || '获取失败')}
@@ -381,7 +396,7 @@
             } catch (err) {
                 setHtml('赛段单次分析', `
                     <div class="segment-back">
-                        <button class="btn-back" onclick="analyzeSegments('${currentSegmentActivityId || ''}', '')">返回赛段列表</button>
+                        <button class="btn-back" onclick="backToSegmentList()">返回赛段列表</button>
                     </div>
                     <div style="color:#c00;padding:20px 0;text-align:center;">
                         请求出错：${escapeHtml(err.message)}
@@ -449,7 +464,7 @@
 
             setHtml(title, `
                 <div class="segment-back">
-                    <button class="btn-back" onclick="loadSegmentHistory('${sid}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}')">返回赛段趋势</button>
+                    <button class="btn-back" onclick="openSegmentHistory('${sid}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}')">返回赛段趋势</button>
                 </div>
                 <div class="metric-highlight">${cardsHtml}</div>
                 <div class="analysis-grid">
@@ -468,13 +483,13 @@
                 ${prHtml}
                 ${geoHtml}
                 <div style="text-align:center;margin-top:20px;">
-                    <button class="btn-back" onclick="loadSegmentHistory('${sid}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}')">返回赛段趋势</button>
+                    <button class="btn-back" onclick="openSegmentHistory('${sid}', '${escapeHtml(segmentName).replace(/'/g, "\\'")}')">返回赛段趋势</button>
                 </div>
             `);
 
             // 坡度-功率匹配图：由于没有 effort 级 stream，用赛段整体数据模拟单点
             const gradeCtx = document.getElementById('segmentGradePowerCanvas').getContext('2d');
-            segmentChartInstances.gradePower = new Chart(gradeCtx, {
+            createChart('segment:gradePower', gradeCtx, {
                 type: 'bar',
                 data: {
                     labels: ['本次 effort'],

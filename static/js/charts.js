@@ -1,22 +1,69 @@
-/* charts.js — Chart.js 图表渲染（由 templates/dashboard.html 拆分） */
+/* charts.js — Chart.js 全局主题、实例注册表与图表渲染（由 templates/dashboard.html 拆分） */
 
-let chartInstance = null;
-        let powerChartInstance = null;
-        let hrChartInstance = null;
-        let topElevationChartInstance = null;
-        let topDistanceChartInstance = null;
-        let analysisChartInstances = {};
+// 统一图表实例注册表：按 key 创建/替换/销毁，页面切换时不再逐个手动 destroy
+const ChartRegistry = {
+    _charts: new Map(),
 
-        // 图表分析筛选条件（运动类型在页面间保持选中）
-        let chartSportType = '';
+    add(key, chart) {
+        this.destroy(key);
+        this._charts.set(key, chart);
+        return chart;
+    },
+
+    destroy(key) {
+        const chart = this._charts.get(key);
+        if (chart) {
+            chart.destroy();
+            this._charts.delete(key);
+        }
+    },
+
+    destroyGroup(prefix) {
+        for (const key of [...this._charts.keys()]) {
+            if (key.startsWith(prefix)) this.destroy(key);
+        }
+    },
+
+    destroyAll() {
+        for (const key of [...this._charts.keys()]) this.destroy(key);
+    },
+};
+
+// 创建图表的统一入口：先销毁同名旧实例，再创建新图表。
+// 销毁必须发生在 new Chart 之前——同一 canvas 重建时，旧实例若还挂着，
+// Chart.js 会抛 "Canvas is already in use"。
+function createChart(key, ctx, config) {
+    ChartRegistry.destroy(key);
+    const chart = new Chart(ctx, config);
+    ChartRegistry._charts.set(key, chart);
+    return chart;
+}
+
+// 全局主题：所有图表共享字体、legend、tooltip 与网格样式
+(function applyChartTheme() {
+    if (typeof Chart === 'undefined') return;
+    Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    Chart.defaults.font.size = 12;
+    Chart.defaults.color = '#5a636e';
+    Chart.defaults.borderColor = 'rgba(0, 0, 0, 0.06)';
+    Chart.defaults.animation.duration = 350;
+    Chart.defaults.plugins.legend.position = 'top';
+    Chart.defaults.plugins.legend.align = 'end';
+    Chart.defaults.plugins.legend.labels.usePointStyle = true;
+    Chart.defaults.plugins.legend.labels.pointStyle = 'circle';
+    Chart.defaults.plugins.legend.labels.boxWidth = 7;
+    Chart.defaults.plugins.legend.labels.padding = 14;
+    Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(31, 35, 41, 0.92)';
+    Chart.defaults.plugins.tooltip.padding = 10;
+    Chart.defaults.plugins.tooltip.cornerRadius = 8;
+    Chart.defaults.plugins.tooltip.titleFont = { size: 12, weight: '600' };
+    Chart.defaults.plugins.tooltip.bodyFont = { size: 12 };
+    Chart.defaults.plugins.tooltip.boxPadding = 4;
+})();
+
 
         function renderChart(labels, series, metric) {
             const ctx = document.getElementById('chartCanvas').getContext('2d');
-            if (chartInstance) {
-                chartInstance.destroy();
-                chartInstance = null;
-            }
-
             const values = (series[metric] || []).map(v => Number(v) || 0);
             const isLine = metric === 'elevation_gain_m';
             const label = metricLabels[metric] || metric;
@@ -109,16 +156,11 @@ let chartInstance = null;
                 }
             };
 
-            chartInstance = new Chart(ctx, cfg);
+            createChart('main', ctx, cfg);
         }
 
         function renderPowerDist(data) {
             const ctx = document.getElementById('powerDistCanvas').getContext('2d');
-            if (powerChartInstance) {
-                powerChartInstance.destroy();
-                powerChartInstance = null;
-            }
-
             const labels = data.labels || [];
             const hours = (data.hours || []).map(v => Number(v) || 0);
             const counts = (data.counts || []).map(v => Number(v) || 0);
@@ -134,7 +176,7 @@ let chartInstance = null;
             gradient.addColorStop(0, 'rgba(252, 76, 2, 0.7)');
             gradient.addColorStop(1, 'rgba(252, 76, 2, 0.15)');
 
-            powerChartInstance = new Chart(ctx, {
+            createChart('power', ctx, {
                 type: 'bar',
                 data: {
                     labels: labels,
@@ -216,11 +258,6 @@ let chartInstance = null;
 
         function renderHRZones(data) {
             const ctx = document.getElementById('hrZoneCanvas').getContext('2d');
-            if (hrChartInstance) {
-                hrChartInstance.destroy();
-                hrChartInstance = null;
-            }
-
             const labels = data.labels || [];
             const hours = (data.hours || []).map(v => Number(v) || 0);
             const counts = (data.counts || []).map(v => Number(v) || 0);
@@ -234,7 +271,7 @@ let chartInstance = null;
             gradient.addColorStop(0, 'rgba(66, 153, 225, 0.7)');
             gradient.addColorStop(1, 'rgba(66, 153, 225, 0.15)');
 
-            hrChartInstance = new Chart(ctx, {
+            createChart('hr', ctx, {
                 type: 'bar',
                 data: {
                     labels: labels,
@@ -308,11 +345,6 @@ let chartInstance = null;
 
         function renderTopElevation(data) {
             const ctx = document.getElementById('topElevationCanvas').getContext('2d');
-            if (topElevationChartInstance) {
-                topElevationChartInstance.destroy();
-                topElevationChartInstance = null;
-            }
-
             const items = Array.isArray(data) ? data : [];
             if (items.length === 0) {
                 ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -328,7 +360,7 @@ let chartInstance = null;
             gradient.addColorStop(0, 'rgba(34, 197, 94, 0.55)');
             gradient.addColorStop(1, 'rgba(34, 197, 94, 0.9)');
 
-            topElevationChartInstance = new Chart(ctx, {
+            createChart('topElevation', ctx, {
                 type: 'bar',
                 data: {
                     labels: labels,
@@ -379,11 +411,6 @@ let chartInstance = null;
 
         function renderTopDistance(data) {
             const ctx = document.getElementById('topDistanceCanvas').getContext('2d');
-            if (topDistanceChartInstance) {
-                topDistanceChartInstance.destroy();
-                topDistanceChartInstance = null;
-            }
-
             const items = Array.isArray(data) ? data : [];
             if (items.length === 0) {
                 ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -398,7 +425,7 @@ let chartInstance = null;
             gradient.addColorStop(0, 'rgba(252, 76, 2, 0.55)');
             gradient.addColorStop(1, 'rgba(252, 76, 2, 0.9)');
 
-            topDistanceChartInstance = new Chart(ctx, {
+            createChart('topDistance', ctx, {
                 type: 'bar',
                 data: {
                     labels: labels,
@@ -449,10 +476,7 @@ let chartInstance = null;
 
         // --- 活动流数据分析 ---
         function destroyAnalysisCharts() {
-            Object.values(analysisChartInstances).forEach(chart => {
-                if (chart) chart.destroy();
-            });
-            analysisChartInstances = {};
+            ChartRegistry.destroyGroup('analysis:');
             destroyActivityRouteMap();
         }
 
@@ -472,7 +496,7 @@ let chartInstance = null;
             const labels = _analysisDistanceLabels(data.distance_km);
             const altitudes = (data.altitude || []).map(v => Number(v) || 0);
             const gradient = _mkAnalysisGradient(ctx, 'rgba(34, 197, 94, 0.5)', 'rgba(34, 197, 94, 0.05)');
-            analysisChartInstances.elevation = new Chart(ctx, {
+            createChart('analysis:elevation', ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
@@ -507,7 +531,7 @@ let chartInstance = null;
             const hr = (data.heartrate || []).map(v => Number(v) || 0);
             const avg = data.summary && data.summary.avg_heartrate ? Number(data.summary.avg_heartrate) : null;
             const avgData = avg !== null ? hr.map(() => avg) : [];
-            analysisChartInstances.hr = new Chart(ctx, {
+            createChart('analysis:hr', ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
@@ -553,7 +577,7 @@ let chartInstance = null;
             const speed = (data.velocity_kmh || []).map(v => Number(v) || 0);
             const avg = data.summary && data.summary.avg_velocity_kmh ? Number(data.summary.avg_velocity_kmh) : null;
             const avgData = avg !== null ? speed.map(() => avg) : [];
-            analysisChartInstances.speed = new Chart(ctx, {
+            createChart('analysis:speed', ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
@@ -603,7 +627,7 @@ let chartInstance = null;
                 ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
                 return;
             }
-            analysisChartInstances.power = new Chart(ctx, {
+            createChart('analysis:power', ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
@@ -648,7 +672,7 @@ let chartInstance = null;
             const labels = _analysisDistanceLabels(data.distance_km);
             const hr = (data.heartrate || []).map(v => Number(v) || 0);
             const watts = (data.watts || []).map(v => Number(v) || 0);
-            analysisChartInstances.hrPower = new Chart(ctx, {
+            createChart('analysis:hrPower', ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
@@ -703,7 +727,7 @@ let chartInstance = null;
                 const inClimb = climbs.some(c => km >= c.start_km && km <= c.end_km);
                 return g > 5 || inClimb ? 'rgba(239, 68, 68, 0.6)' : 'rgba(34, 197, 94, 0.25)';
             });
-            analysisChartInstances.elevationGrade = new Chart(ctx, {
+            createChart('analysis:elevationGrade', ctx, {
                 type: 'bar',
                 data: {
                     labels: labels,
@@ -755,7 +779,7 @@ let chartInstance = null;
             const hours = stats.map(s => s.hours);
             const pcts = stats.map(s => s.pct);
             const colors = ['#3b82f6', '#22c55e', '#eab308', '#f97316', '#ef4444'];
-            analysisChartInstances.hrZoneDist = new Chart(ctx, {
+            createChart('analysis:hrZoneDist', ctx, {
                 type: 'bar',
                 data: {
                     labels: labels,

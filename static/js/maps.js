@@ -21,7 +21,6 @@
         let activityRouteMapInstance = null;
         let routeMapInstance = null;
         let routeMapLayerGroup = null;
-        let routeMapFilters = { year: '', month: '', sportType: '' };
 
         // 切换页面时销毁地图实例，避免叶子节点残留
         function disposeRouteMaps() {
@@ -225,39 +224,13 @@
         let routeMapLoading = false;
 
         function buildRouteMapControls() {
-            const opts = getFilterOptions(allActivities);
-            const yearOptions = opts.years
-                .map(y => `<option value="${y}" ${routeMapFilters.year === String(y) ? 'selected' : ''}>${y} 年</option>`)
-                .join('');
-            const sportTypeOptions = Array.from(new Set([...opts.sportTypes, ...opts.types]))
-                .sort()
-                .map(t => `<option value="${escapeHtml(t)}" ${routeMapFilters.sportType === t ? 'selected' : ''}>${escapeHtml(t)}</option>`)
-                .join('');
-
+            // 年份/月份/运动类型由顶部全局筛选栏接管
             return `
                 <div class="filter-bar">
                     <div class="filter-group">
-                        <label for="route-year">年份</label>
-                        <select id="route-year">
-                            <option value="">全部</option>
-                            ${yearOptions}
-                        </select>
+                        <label>时间与类型</label>
+                        <span style="font-size:13px;color:#5a636e;padding:8px 0;">跟随顶部全局时间范围与运动类型</span>
                     </div>
-                    <div class="filter-group">
-                        <label for="route-month">月份</label>
-                        <select id="route-month">
-                            <option value="">全部</option>
-                            ${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => `<option value="${m}" ${routeMapFilters.month === String(m) ? 'selected' : ''}>${m} 月</option>`).join('')}
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label for="route-sport-type">运动类型</label>
-                        <select id="route-sport-type">
-                            <option value="">全部</option>
-                            ${sportTypeOptions}
-                        </select>
-                    </div>
-                    <button class="btn-primary" onclick="applyRouteMapFilters()">查询</button>
                     <button class="btn-back" id="route-load-uncached" onclick="loadAllRoutes(this)">加载全部轨迹</button>
                 </div>
                 <div class="chart-card">
@@ -369,10 +342,8 @@
         }
 
         function buildRouteQuery(fetchCount) {
-            const qs = [];
-            if (routeMapFilters.year) qs.push('year=' + encodeURIComponent(routeMapFilters.year));
-            if (routeMapFilters.month) qs.push('month=' + encodeURIComponent(routeMapFilters.month));
-            if (routeMapFilters.sportType) qs.push('sport_type=' + encodeURIComponent(routeMapFilters.sportType));
+            // 筛选参数来自顶部全局筛选栏（start/end + sport_type）
+            const qs = globalDateQuery();
             if (fetchCount) qs.push('fetch=' + fetchCount);
             return qs.length ? ('?' + qs.join('&')) : '';
         }
@@ -405,14 +376,6 @@
             return data;
         }
 
-        function applyRouteMapFilters() {
-            routeMapLoading = false;
-            routeMapFilters.year = document.getElementById('route-year').value;
-            routeMapFilters.month = document.getElementById('route-month').value;
-            routeMapFilters.sportType = document.getElementById('route-sport-type').value;
-            fetchAndRenderRoutes(0);
-        }
-
         // 一次点击连续分批抓取，直到抓完或触发 Strava 限流；再次点击可停止
         async function loadAllRoutes(btn) {
             if (routeMapLoading) {
@@ -443,7 +406,6 @@
 
         async function loadRouteMap(btn) {
             setActiveMenu(btn);
-            currentPageReload = () => loadRouteMap(btn);
             setLoading('线路热图（正在同步，请稍候）...');
 
             try {

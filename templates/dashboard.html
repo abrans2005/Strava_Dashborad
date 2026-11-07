@@ -34,16 +34,16 @@
             <aside class="sidebar-left">
                 <div class="menu-title">功能菜单</div>
                 <div class="menu-list">
-                    <button class="menu-item active" onclick="loadChart(this)">
+                    <button class="menu-item" data-route="chart" onclick="navigate('chart')">
                         图表分析
                     </button>
-                    <button class="menu-item" onclick="loadActivities(this)">
+                    <button class="menu-item" data-route="activities" onclick="navigate('activities')">
                         活动列表
                     </button>
-                    <button class="menu-item" onclick="loadTrainingDashboard(this)">
+                    <button class="menu-item" data-route="training" onclick="navigate('training')">
                         训练负荷
                     </button>
-                    <button class="menu-item" onclick="loadRouteMap(this)">
+                    <button class="menu-item" data-route="map" onclick="navigate('map')">
                         线路热图
                     </button>
                 </div>
@@ -56,6 +56,26 @@
                     <h2 id="page-title">图表分析</h2>
                     <div style="display:flex;gap:8px;align-items:center;">
                         <button class="btn-back" onclick="location.href='/'">返回登录页</button>
+                    </div>
+                </div>
+                <!-- 全局筛选：时间范围 + 运动类型，各页面共享，状态随 URL 持久化 -->
+                <div class="filter-bar filter-bar-global" id="global-filter-bar">
+                    <div class="filter-group">
+                        <label for="global-period">时间范围</label>
+                        <select id="global-period"></select>
+                    </div>
+                    <div class="filter-group" id="global-custom-range" style="display:none;">
+                        <label>起止日期</label>
+                        <div style="display:flex;gap:8px;">
+                            <input type="date" id="global-from">
+                            <input type="date" id="global-to">
+                        </div>
+                    </div>
+                    <div class="filter-group">
+                        <label for="global-sport">运动类型</label>
+                        <select id="global-sport">
+                            <option value="">全部</option>
+                        </select>
                     </div>
                 </div>
                 <div class="content-body empty" id="result">
@@ -79,6 +99,8 @@
     <script src="{{ url_for('static', filename='vendor/leaflet.js') }}"></script>
     <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/core.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/filters.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/router.js') }}"></script>
     <script src="{{ url_for('static', filename='js/charts.js') }}"></script>
     <script src="{{ url_for('static', filename='js/chart-page.js') }}"></script>
     <script src="{{ url_for('static', filename='js/analysis.js') }}"></script>

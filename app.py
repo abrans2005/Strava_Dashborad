@@ -7,7 +7,7 @@ import tempfile
 import threading
 import time
 import urllib.parse
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 from flask import Flask, render_template, request, jsonify, redirect
@@ -1239,6 +1239,83 @@ def _parse_sport_type_arg():
     return sport_type or None
 
 
+def _parse_range_args():
+    """解析 start/end 日期范围参数（本地日期，闭区间）。"""
+    start_raw = (request.args.get("start") or "").strip()
+    end_raw = (request.args.get("end") or "").strip()
+    try:
+        start = date.fromisoformat(start_raw) if start_raw else None
+    except ValueError:
+        return None, None, "start 必须是 YYYY-MM-DD 日期"
+    try:
+        end = date.fromisoformat(end_raw) if end_raw else None
+    except ValueError:
+        return None, None, "end 必须是 YYYY-MM-DD 日期"
+    if start and end and start > end:
+        return None, None, "start 不能晚于 end"
+    return start, end, None
+
+
+def _filter_activities_by_range(activities, start=None, end=None):
+    """按活动本地日期的闭区间筛选。"""
+    if start is None and end is None:
+        return list(activities)
+    result = []
+    for activity in activities:
+        dt = _activity_local_datetime(activity)
+        if dt is None:
+            continue
+        if start is not None and dt.date() < start:
+            continue
+        if end is not None and dt.date() > end:
+            continue
+        result.append(activity)
+    return result
+
+
+def _iter_month_labels(start, end, max_months=36):
+    """生成 start..end 覆盖的连续月份标签（YYYY-MM），超长时截断。"""
+    first = date(start.year, start.month, 1)
+    last = date(end.year, end.month, 1)
+    labels = []
+    cursor = first
+    while cursor <= last and len(labels) < max_months:
+        labels.append(f"{cursor.year}-{cursor.month:02d}")
+        cursor = date(cursor.year + (1 if cursor.month == 12 else 0),
+                      1 if cursor.month == 12 else cursor.month + 1, 1)
+    return labels
+
+
+def _select_activities_by_args(activities):
+    """按查询参数统一筛选活动：start/end 优先，其次 year/month，再叠加 sport_type。
+
+    返回 (filtered, filters_dict, error)；error 非 None 时调用方直接返回 400。
+    """
+    year, month, error = _parse_year_month_args()
+    if error:
+        return None, None, error
+    start, end, range_error = _parse_range_args()
+    if range_error:
+        return None, None, range_error
+
+    if start is not None or end is not None:
+        filtered = _filter_activities_by_range(activities, start, end)
+    else:
+        filtered = _filter_activities_by_date(activities, year=year, month=month)
+
+    sport_type = _parse_sport_type_arg()
+    filtered = _filter_activities_by_sport(filtered, sport_type)
+
+    filters = {
+        "year": year,
+        "month": month,
+        "sport_type": sport_type,
+        "start": start.isoformat() if start else None,
+        "end": end.isoformat() if end else None,
+    }
+    return filtered, filters, None
+
+
 def _filter_activities_by_sport(activities, sport_type=None):
     """按运动类型过滤：优先匹配 sport_type，兼容只有 type 的旧数据。"""
     if not sport_type:
@@ -1292,24 +1369,32 @@ def chart():
     cache = load_cache()
     activities = cache.get("activities", [])
 
-    year, month, error = _parse_year_month_args()
+    filtered, filters, error = _select_activities_by_args(activities)
     if error:
         return jsonify({"error": error}), 400
-    sport_type = _parse_sport_type_arg()
+    year, month = filters["year"], filters["month"]
+    start, end = filters["start"], filters["end"]
+    sport_type = filters["sport_type"]
     metric = request.args.get("metric", "distance_km")
     if metric not in {"count", "distance_km", "moving_time_hours", "elevation_gain_m"}:
         return jsonify({"error": "unsupported metric"}), 400
 
     all_metrics = ["count", "distance_km", "moving_time_hours", "elevation_gain_m"]
-    filtered = _filter_activities_by_date(activities, year=year, month=month)
-    filtered = _filter_activities_by_sport(filtered, sport_type)
 
     groups = {}
     for activity in filtered:
         key = _activity_local_datetime(activity).strftime("%Y-%m")
         groups.setdefault(key, []).append(activity)
 
-    if year is not None and month is None:
+    if start is not None or end is not None:
+        # 日期范围：生成范围内连续月份标签（最多 36 个月）
+        range_start = date.fromisoformat(start) if start else date.fromisoformat(end)
+        range_end = date.fromisoformat(end) if end else range_start
+        label_acts = [
+            (label, groups.get(label, []))
+            for label in _iter_month_labels(range_start, range_end)
+        ]
+    elif year is not None and month is None:
         label_acts = [
             (f"{year}-{m:02d}", groups.get(f"{year}-{m:02d}", []))
             for m in range(1, 13)
@@ -1325,7 +1410,7 @@ def chart():
             series[m].append(agg.get(m, 0))
 
     return jsonify({
-        "filters": {"year": year, "month": month, "sport_type": sport_type},
+        "filters": filters,
         "labels": labels,
         "metric": metric,
         "series": series,
@@ -1343,12 +1428,9 @@ def power_distribution():
     cache = load_cache()
     activities = cache.get("activities", [])
 
-    year, month, error = _parse_year_month_args()
+    filtered, _, error = _select_activities_by_args(activities)
     if error:
         return jsonify({"error": error}), 400
-    sport_type = _parse_sport_type_arg()
-    filtered = _filter_activities_by_date(activities, year=year, month=month)
-    filtered = _filter_activities_by_sport(filtered, sport_type)
 
     items = [
         (a["average_watts"], a.get("moving_time", 0) or 0)
@@ -1427,12 +1509,9 @@ def hr_zones():
     cache = load_cache()
     activities = cache.get("activities", [])
 
-    year, month, error = _parse_year_month_args()
+    filtered, _, error = _select_activities_by_args(activities)
     if error:
         return jsonify({"error": error}), 400
-    sport_type = _parse_sport_type_arg()
-    filtered = _filter_activities_by_date(activities, year=year, month=month)
-    filtered = _filter_activities_by_sport(filtered, sport_type)
 
     items = [
         (a["average_heartrate"], a.get("moving_time", 0) or 0)
@@ -1474,17 +1553,12 @@ def _is_ride(activity):
 
 @app.route("/chart/top-distance")
 def top_distance():
-    """返回里程排名前 20 的活动，支持按 year / month / 运动类型过滤。"""
-    year, month, error = _parse_year_month_args()
+    """返回里程排名前 20 的活动，支持按 year/month、start/end、运动类型过滤。"""
+    cache = load_cache()
+    activities, _, error = _select_activities_by_args(cache.get("activities", []))
     if error:
         return jsonify({"error": error}), 400
     sport_type = _parse_sport_type_arg()
-
-    cache = load_cache()
-    activities = _filter_activities_by_date(
-        cache.get("activities", []), year=year, month=month
-    )
-    activities = _filter_activities_by_sport(activities, sport_type)
     # 未指定运动类型时保持原来的“骑行”口径，指定后按所选类型排名
     candidates = activities if sport_type else [a for a in activities if _is_ride(a)]
     top = sorted(candidates, key=lambda a: a.get("distance") or 0, reverse=True)[:20]
@@ -1493,17 +1567,12 @@ def top_distance():
 
 @app.route("/chart/top-elevation")
 def top_elevation():
-    """返回爬升排名前 20 的活动，支持按 year / month / 运动类型过滤。"""
-    year, month, error = _parse_year_month_args()
+    """返回爬升排名前 20 的活动，支持按 year/month、start/end、运动类型过滤。"""
+    cache = load_cache()
+    activities, _, error = _select_activities_by_args(cache.get("activities", []))
     if error:
         return jsonify({"error": error}), 400
     sport_type = _parse_sport_type_arg()
-
-    cache = load_cache()
-    activities = _filter_activities_by_date(
-        cache.get("activities", []), year=year, month=month
-    )
-    activities = _filter_activities_by_sport(activities, sport_type)
     candidates = activities if sport_type else [a for a in activities if _is_ride(a)]
     top = sorted(candidates, key=lambda a: a.get("total_elevation_gain") or 0, reverse=True)[:20]
     return jsonify([_activity_summary(a) for a in top])
@@ -1738,17 +1807,32 @@ def map_routes():
     year, month, error = _parse_year_month_args()
     if error:
         return jsonify({"error": error}), 400
+    start, end, range_error = _parse_range_args()
+    if range_error:
+        return jsonify({"error": range_error}), 400
     sport_type = _parse_sport_type_arg()
     fetch_limit = request.args.get("fetch", default=0, type=int) or 0
     fetch_limit = max(0, min(fetch_limit, ROUTE_FETCH_BATCH_LIMIT))
 
     _ensure_athlete_identity()
-    activities = _filter_activities_by_sport(
-        _filter_activities_by_date(
-            load_cache().get("activities", []), year=year, month=month
-        ),
-        sport_type,
-    )
+    if start is not None or end is not None:
+        activities = _filter_activities_by_range(
+            load_cache().get("activities", []), start, end
+        )
+        activities = _filter_activities_by_sport(activities, sport_type)
+        filters = {
+            "year": year,
+            "month": month,
+            "sport_type": sport_type,
+            "start": start.isoformat() if start else None,
+            "end": end.isoformat() if end else None,
+        }
+    else:
+        activities, filters, error = _select_activities_by_args(
+            load_cache().get("activities", [])
+        )
+        if error:
+            return jsonify({"error": error}), 400
 
     cached_ids = _cached_route_ids()
     matched = []
@@ -1809,7 +1893,7 @@ def map_routes():
             "failed": failed,
             "rate_limited": rate_limited,
         },
-        "filters": {"year": year, "month": month, "sport_type": sport_type},
+        "filters": filters,
     })
 
 
@@ -2297,8 +2381,8 @@ def _build_training_load(activities, ftp, days, today):
 def get_training_load():
     """返回训练负荷、短期/长期负荷趋势及当前训练状态。"""
     days = request.args.get("days", default=90, type=int)
-    if days not in {30, 90, 180, 365}:
-        return jsonify({"error": "days 仅支持 30、90、180、365"}), 400
+    if not 1 <= days <= 3650:
+        return jsonify({"error": "days 必须在 1-3650 之间"}), 400
 
     ftp = None
     if "ftp" in request.args:

@@ -95,9 +95,10 @@ function formatSyncTime(iso) {
             }
         }
 
-        // 页面加载后默认打开图表分析（已包含运动员信息）
+        // 页面加载后按当前 hash 打开对应页面（无 hash 默认图表分析）
         document.addEventListener('DOMContentLoaded', () => {
+            initGlobalFilterBar();
             loadHeaderProfile();
-            const chartBtn = document.querySelector('.menu-item[onclick*="loadChart"]');
-            if (chartBtn) loadChart(chartBtn);
+            if (!location.hash) history.replaceState(null, '', '#/chart');
+            dispatchRoute();
         });
