@@ -6,7 +6,7 @@ let currentRoute = null;
 // 离开活动列表前最后一份参数，「返回列表」时用它恢复
 const lastListParams = { activities: {} };
 
-const MENU_ROUTES = ['chart', 'activities', 'training', 'map'];
+const MENU_ROUTES = ['chart', 'activities', 'training', 'map', 'records', 'gear', 'compare'];
 const LIST_CHILD_ROUTES = ['activity', 'segments', 'segment-history', 'segment-effort'];
 
 function parseHash() {
@@ -60,6 +60,19 @@ function setActiveRoute(name) {
     return btn;
 }
 
+// 全局筛选参数：菜单切页时随行，保证各页共享同一时间范围与运动类型
+const GLOBAL_PARAM_KEYS = ['period', 'from', 'to', 'sport'];
+
+function navigateMenu(name) {
+    const params = {};
+    if (currentRoute) {
+        GLOBAL_PARAM_KEYS.forEach(k => {
+            if (currentRoute.params[k]) params[k] = currentRoute.params[k];
+        });
+    }
+    navigate(name, params);
+}
+
 function dispatchRoute() {
     const route = parseHash();
     currentRoute = route;
@@ -78,6 +91,15 @@ function dispatchRoute() {
             break;
         case 'map':
             loadRouteMap(btn);
+            break;
+        case 'records':
+            loadRecords(btn);
+            break;
+        case 'gear':
+            loadGear(btn);
+            break;
+        case 'compare':
+            loadCompare(btn);
             break;
         case 'activity':
             analyzeActivity(route.segments[0]);

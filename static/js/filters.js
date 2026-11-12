@@ -77,9 +77,16 @@ function updateGlobalFilters(patch) {
         globalFilters.from = '';
         globalFilters.to = '';
     }
-    // 自定义范围要等起止日期都选好再刷新，避免中间态请求
+    // 自定义范围要等起止日期都选好再刷新，避免中间态请求；
+    // 中间态只更新控件（不能从路由参数回读，路由此时还没变）
     if (globalFilters.period === 'custom' && !(globalFilters.from && globalFilters.to)) {
-        syncGlobalFilterBar();
+        applyGlobalFilterControls();
+        return;
+    }
+    if (globalFilters.period === 'custom'
+        && globalFilters.from > globalFilters.to) {
+        // 起止颠倒：不发起请求，等用户改到合法范围
+        applyGlobalFilterControls();
         return;
     }
     const route = currentRoute || { name: 'chart', params: {} };
@@ -92,6 +99,17 @@ function updateGlobalFilters(patch) {
     }, true);
 }
 
+// 把 globalFilters 工作副本刷到控件上（不含运动类型选项，选项由数据填充）
+function applyGlobalFilterControls() {
+    const periodSel = document.getElementById('global-period');
+    if (!periodSel) return;
+    periodSel.value = globalFilters.period;
+    document.getElementById('global-from').value = globalFilters.from;
+    document.getElementById('global-to').value = globalFilters.to;
+    document.getElementById('global-custom-range').style.display =
+        globalFilters.period === 'custom' ? '' : 'none';
+}
+
 // 从当前路由参数恢复全局筛选栏（前进/后退、分享链接都走这里）
 function syncGlobalFilterBar() {
     const p = currentRoute ? currentRoute.params : {};
@@ -100,14 +118,9 @@ function syncGlobalFilterBar() {
     globalFilters.to = p.to || '';
     globalFilters.sport = p.sport || '';
 
-    const periodSel = document.getElementById('global-period');
-    if (!periodSel) return;
-    periodSel.value = globalFilters.period;
-    document.getElementById('global-from').value = globalFilters.from;
-    document.getElementById('global-to').value = globalFilters.to;
-    document.getElementById('global-sport').value = globalFilters.sport;
-    document.getElementById('global-custom-range').style.display =
-        globalFilters.period === 'custom' ? '' : 'none';
+    applyGlobalFilterControls();
+    const sportSel = document.getElementById('global-sport');
+    if (sportSel) sportSel.value = globalFilters.sport;
 }
 
 // 运动类型选项依赖活动数据，活动同步完成后调用一次

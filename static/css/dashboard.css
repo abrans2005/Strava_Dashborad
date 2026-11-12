@@ -287,9 +287,159 @@ body {
 }
 
 .metric-card .value {
-    font-size: 22px;
+    font-size: 28px;
     font-weight: 700;
     color: #333;
+    font-variant-numeric: tabular-nums;
+}
+
+.metric-card .delta {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #8a919c;
+}
+
+/* ===== 运动员横幅（图表分析页） ===== */
+.profile-banner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: #fff;
+    border: 1px solid var(--border, #eee);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+}
+
+.profile-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.profile-id {
+    flex: 1;
+    min-width: 0;
+}
+
+.profile-name {
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.profile-link {
+    font-size: 12px;
+    color: #fc4c02;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.profile-link:hover {
+    text-decoration: underline;
+}
+
+.profile-meta {
+    font-size: 12px;
+    color: #8a919c;
+    margin-top: 3px;
+}
+
+.profile-stats {
+    display: flex;
+    gap: 26px;
+    flex-shrink: 0;
+}
+
+.profile-stat {
+    text-align: right;
+}
+
+.profile-stat .v {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #333;
+}
+
+.profile-stat .l {
+    font-size: 11px;
+    color: #8a919c;
+}
+
+.zone-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.zone-chip {
+    font-size: 11px;
+    color: #5a636e;
+    background: #f4f5f7;
+    border-radius: 999px;
+    padding: 3px 9px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.zone-chip i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+/* ===== 指标分段按钮 ===== */
+.metric-chips {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.metric-chip {
+    border: 1px solid var(--border, #e5e7eb);
+    background: #fff;
+    color: #5a636e;
+    border-radius: 999px;
+    padding: 6px 18px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s var(--ease, ease);
+}
+
+.metric-chip:hover {
+    border-color: #fc4c02;
+    color: #fc4c02;
+}
+
+.metric-chip.active {
+    background: #fc4c02;
+    border-color: #fc4c02;
+    color: #fff;
+    font-weight: 600;
+}
+
+@media (max-width: 640px) {
+    .profile-banner {
+        flex-wrap: wrap;
+    }
+    .profile-stats {
+        width: 100%;
+        justify-content: flex-start;
+    }
+    .profile-stat {
+        text-align: left;
+    }
 }
 
 /* 图表卡片 */
@@ -1461,4 +1611,194 @@ body {
     .header-user .meta {
         display: none;
     }
+}
+
+/* ===== 个人纪录 / 装备里程 / 周期对比 ===== */
+.section-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 22px 0 10px;
+}
+
+.record-grid,
+.gear-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 14px;
+}
+
+.record-card {
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #eee);
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    box-shadow: var(--shadow-sm, none);
+}
+
+.record-label {
+    font-size: 13px;
+    color: #8a919c;
+}
+
+.record-value {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--text, #1f2329);
+    font-variant-numeric: tabular-nums;
+}
+
+.record-sub {
+    font-size: 12px;
+    color: #8a919c;
+}
+
+.record-activity {
+    font-size: 13px;
+    color: #5a636e;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.record-card .btn-back {
+    align-self: flex-start;
+    margin-top: 4px;
+}
+
+.coverage-note {
+    font-size: 12px;
+    color: #8a919c;
+    margin-bottom: 10px;
+    line-height: 1.5;
+}
+
+.gear-card {
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #eee);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: var(--shadow-sm, none);
+}
+
+.gear-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.gear-type-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #4338ca;
+    white-space: nowrap;
+}
+
+.gear-type-badge.shoe {
+    background: #fef3e2;
+    color: #b45309;
+}
+
+.gear-name {
+    font-size: 14px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gear-progress {
+    height: 8px;
+    border-radius: 999px;
+    background: #eceff3;
+    overflow: hidden;
+    margin: 12px 0 6px;
+}
+
+.gear-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: #2563eb;
+    transition: width 0.4s var(--ease, ease);
+}
+
+.gear-progress-fill.warn {
+    background: #f59e0b;
+}
+
+.gear-progress-fill.alert {
+    background: #ef4444;
+}
+
+.gear-progress-text {
+    font-size: 12px;
+    color: #8a919c;
+    margin-bottom: 10px;
+}
+
+.gear-stats-row {
+    font-size: 13px;
+    color: #5a636e;
+    margin-top: 3px;
+}
+
+.gear-total {
+    font-size: 12px;
+    color: #8a919c;
+    margin-top: 8px;
+}
+
+.compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 960px) {
+    .compare-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.compare-table-wrap {
+    overflow-x: auto;
+}
+
+.compare-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.compare-table th,
+.compare-table td {
+    padding: 9px 10px;
+    font-size: 13px;
+    border-bottom: 1px solid #f0f1f3;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.compare-table th {
+    color: #8a919c;
+    font-weight: 500;
+}
+
+.compare-table td.num {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+.delta-up { color: #16a34a; }
+.delta-down { color: #ef4444; }
+.delta-flat { color: #8a919c; }
+
+.radar-box {
+    position: relative;
+    height: 300px;
+    margin-top: 12px;
 }

@@ -32,7 +32,7 @@ TOKEN_REFRESH_BUFFER_SECONDS = 60
 CACHE_ROOT_DIR = "cache"
 ACTIVITY_CACHE_FILENAME = "activities.json"
 ATHLETE_CACHE_FILENAME = "athlete.json"
-CACHE_VERSION = 4
+CACHE_VERSION = 5  # v5: 活动缓存新增 gear_id（装备里程统计需要）
 AUTO_SYNC_INTERVAL_SECONDS = 2 * 60 * 60
 FULL_SYNC_INTERVAL_SECONDS = 24 * 60 * 60
 SYNC_BUFFER_MINUTES = 5
@@ -941,6 +941,7 @@ def activity_to_dict(a):
         "weighted_average_watts": to_number(a.weighted_average_watts),
         "max_watts": to_number(a.max_watts),
         "kilojoules": to_number(a.kilojoules),
+        "gear_id": to_str(getattr(a, "gear_id", None)),
     }
 
 
@@ -950,7 +951,7 @@ ACTIVITY_FIELDS = (
     "distance", "moving_time", "elapsed_time", "total_elevation_gain",
     "average_speed", "max_speed", "average_cadence", "average_heartrate",
     "max_heartrate", "suffer_score", "has_heartrate", "average_watts",
-    "weighted_average_watts", "max_watts", "kilojoules",
+    "weighted_average_watts", "max_watts", "kilojoules", "gear_id",
 )
 
 
@@ -1131,6 +1132,7 @@ def aggregate_activities(activities):
         "moving_time_hours": round(moving_time / 3600, 2),
         "elevation_gain_m": round(elevation, 0),
         "avg_distance_km": round(distance / 1000 / count, 2) if count else 0,
+        "suffer_score": round(sum((a.get("suffer_score") or 0) for a in activities), 0),
     }
 
 
@@ -2375,6 +2377,305 @@ def _build_training_load(activities, ftp, days, today):
         "weekly": weekly,
         "activities": visible_details[:15],
     }
+
+
+# ============== 个人纪录 / 装备里程 / 周期对比 ==============
+
+def _activity_brief(a):
+    """纪录卡片里展示的活动摘要。"""
+    return {
+        "id": a.get("id"),
+        "name": a.get("name"),
+        "type": a.get("type"),
+        "sport_type": a.get("sport_type"),
+        "start_date_local": a.get("start_date_local"),
+        "distance_km": round((a.get("distance") or 0) / 1000, 2),
+        "total_elevation_gain": a.get("total_elevation_gain") or 0,
+        "moving_time": a.get("moving_time") or 0,
+    }
+
+
+def _best_time_over_distance(times, distances_m, target_m):
+    """在累计距离/时间序列里找出覆盖 target_m 的最短用时（秒）。
+
+    times 为秒序列，distances_m 为累计距离（米），两者等长且单调递增。
+    """
+    if not times or not distances_m or len(times) != len(distances_m):
+        return None
+    best = None
+    i = 0
+    for j in range(1, len(distances_m)):
+        while distances_m[j] - distances_m[i] >= target_m:
+            duration = times[j] - times[i]
+            if duration >= 0 and (best is None or duration < best):
+                best = duration
+            i += 1
+    return best
+
+
+def _best_avg_power_window(times, watts, window_s=1200):
+    """滑动时间窗口内的最大平均功率（瓦），默认 20 分钟。"""
+    pairs = [(t, w) for t, w in zip(times, watts)
+             if isinstance(t, (int, float)) and isinstance(w, (int, float))]
+    if len(pairs) < 2:
+        return None
+    best = None
+    lo = 0
+    total = 0.0
+    for hi, (t, w) in enumerate(pairs):
+        total += w
+        while lo <= hi and t - pairs[lo][0] > window_s:
+            total -= pairs[lo][1]
+            lo += 1
+        n = hi - lo + 1
+        if n > 1:
+            avg = total / n
+            if best is None or avg > best:
+                best = avg
+    return best
+
+
+@app.route("/records")
+def get_records():
+    """个人纪录：活动级纪录来自缓存活动；流数据纪录只扫描已缓存的 streams。
+
+    支持 start/end 与 sport_type 过滤（与 /chart 一致）。
+    """
+    if not session_state.get("client"):
+        return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
+
+    activities, _, error = _select_activities_by_args(load_cache().get("activities", []))
+    if error:
+        return jsonify({"error": error}), 400
+
+    # ---- 活动级纪录：不依赖流数据 ----
+    record_defs = [
+        ("longest_distance", "最长单次距离",
+         lambda a: (a.get("distance") or 0),
+         lambda a: f"{(a.get('distance') or 0) / 1000:.2f} km"),
+        ("max_elevation", "单次最大爬升",
+         lambda a: (a.get("total_elevation_gain") or 0),
+         lambda a: f"{a.get('total_elevation_gain') or 0:.0f} m"),
+        ("longest_time", "单次最长时长",
+         lambda a: (a.get("moving_time") or 0),
+         lambda a: format_duration_cn(a.get("moving_time") or 0)),
+        ("max_avg_power", "最高平均功率",
+         lambda a: a.get("average_watts"),
+         lambda a: f"{a.get('average_watts'):.0f} W"),
+        ("max_weighted_power", "最高加权功率",
+         lambda a: a.get("weighted_average_watts"),
+         lambda a: f"{a.get('weighted_average_watts'):.0f} W"),
+        ("max_avg_hr", "最高平均心率",
+         lambda a: a.get("average_heartrate"),
+         lambda a: f"{a.get('average_heartrate'):.0f} bpm"),
+        ("max_suffer", "单次最高强度分",
+         lambda a: a.get("suffer_score"),
+         lambda a: f"{a.get('suffer_score'):.0f}"),
+        ("max_avg_speed", "最高平均速度",
+         lambda a: (a.get("average_speed") or 0) if a.get("average_speed") else None,
+         lambda a: f"{a.get('average_speed') * 3.6:.1f} km/h"),
+    ]
+    records = []
+    for key, label, getter, displayer in record_defs:
+        best, best_act = None, None
+        for a in activities:
+            v = getter(a)
+            if v is None or v <= 0:
+                continue
+            if best is None or v > best:
+                best, best_act = v, a
+        if best_act:
+            records.append({
+                "key": key,
+                "label": label,
+                "value": best,
+                "display": displayer(best_act),
+                "activity": _activity_brief(best_act),
+            })
+
+    # ---- 流数据纪录：只统计本地已有 streams 缓存的活动 ----
+    targets = [("fastest_5k", "最快 5K", 5000.0),
+               ("fastest_10k", "最快 10K", 10000.0)]
+    best_by_key = {}
+    checked = 0
+    for a in activities:
+        streams = load_streams_cache(a["id"])
+        if not isinstance(streams, dict):
+            continue
+        checked += 1
+        times = streams.get("time") or []
+        distances_m = [d * 1000.0 for d in (streams.get("distance_km") or [])]
+        for key, label, target_m in targets:
+            if distances_m and distances_m[-1] < target_m:
+                continue
+            best = _best_time_over_distance(times, distances_m, target_m)
+            if best is None:
+                continue
+            cur = best_by_key.get(key)
+            if cur is None or best < cur["value"]:
+                best_by_key[key] = {
+                    "key": key, "label": label, "value": best,
+                    "display": format_duration_cn(best),
+                    "pace": format_pace_cn(best, target_m),
+                    "activity": _activity_brief(a),
+                }
+        if streams.get("has_watts"):
+            best_w = _best_avg_power_window(
+                streams.get("time") or [], streams.get("watts") or [], 1200)
+            if best_w:
+                cur = best_by_key.get("power_20min")
+                if cur is None or best_w > cur["value"]:
+                    best_by_key["power_20min"] = {
+                        "key": "power_20min", "label": "20 分钟最佳功率",
+                        "value": round(best_w, 1),
+                        "display": f"{best_w:.0f} W",
+                        "activity": _activity_brief(a),
+                    }
+
+    return jsonify({
+        "records": records,
+        "stream_records": list(best_by_key.values()),
+        "stream_coverage": {"checked": checked, "total": len(activities)},
+    })
+
+
+def format_duration_cn(seconds):
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h} 小时 {m:02d} 分"
+    if m:
+        return f"{m} 分 {s:02d} 秒"
+    return f"{s} 秒"
+
+
+def format_pace_cn(duration_s, distance_m):
+    """配速：分钟/公里。"""
+    if distance_m <= 0:
+        return ""
+    pace_s = duration_s / (distance_m / 1000.0)
+    pm, ps = divmod(int(round(pace_s)), 60)
+    return f"{pm}:{ps:02d} /km"
+
+
+@app.route("/gear/stats")
+def get_gear_stats():
+    """装备里程统计：按 gear_id 聚合筛选范围内的活动，叠加 Strava 全期里程。"""
+    if not session_state.get("client"):
+        return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
+
+    activities, _, error = _select_activities_by_args(load_cache().get("activities", []))
+    if error:
+        return jsonify({"error": error}), 400
+
+    athlete = get_cached_athlete() or {}
+    gear_meta = {}
+    for group, label in (("bikes", "自行车"), ("shoes", "跑鞋")):
+        for g in athlete.get(group) or []:
+            if g.get("id"):
+                gear_meta[g["id"]] = {
+                    "name": g.get("name") or "未命名装备",
+                    "type_label": label,
+                    "strava_total_km": round((g.get("distance") or 0) / 1000, 1),
+                }
+
+    usage = {}
+    for a in activities:
+        gid = a.get("gear_id")
+        if not gid:
+            continue
+        s = usage.setdefault(gid, {
+            "distance_km": 0.0, "count": 0,
+            "moving_time_hours": 0.0, "elevation_m": 0.0, "last_used": None,
+        })
+        s["distance_km"] += (a.get("distance") or 0) / 1000
+        s["count"] += 1
+        s["moving_time_hours"] += (a.get("moving_time") or 0) / 3600
+        s["elevation_m"] += a.get("total_elevation_gain") or 0
+        local = a.get("start_date_local") or ""
+        if local and (s["last_used"] is None or local > s["last_used"]):
+            s["last_used"] = local
+
+    items = []
+    for gid, meta in gear_meta.items():
+        s = usage.get(gid, {"distance_km": 0.0, "count": 0,
+                            "moving_time_hours": 0.0, "elevation_m": 0.0,
+                            "last_used": None})
+        items.append({
+            "gear_id": gid,
+            **meta,
+            "distance_km": round(s["distance_km"], 1),
+            "count": s["count"],
+            "moving_time_hours": round(s["moving_time_hours"], 1),
+            "elevation_m": round(s["elevation_m"], 0),
+            "last_used": s["last_used"],
+        })
+    # 活动里有、但装备档案里没有的 gear_id（换号/旧缓存），兜底列出
+    for gid, s in usage.items():
+        if gid in gear_meta:
+            continue
+        items.append({
+            "gear_id": gid,
+            "name": f"未知装备（{gid}）",
+            "type_label": "其他",
+            "strava_total_km": 0.0,
+            "distance_km": round(s["distance_km"], 1),
+            "count": s["count"],
+            "moving_time_hours": round(s["moving_time_hours"], 1),
+            "elevation_m": round(s["elevation_m"], 0),
+            "last_used": s["last_used"],
+        })
+    # 有使用记录的排前面，按范围内里程降序
+    items.sort(key=lambda x: (-x["distance_km"], -x["count"]))
+    return jsonify({"items": items})
+
+
+def _parse_two_dates(start_raw, end_raw, label):
+    try:
+        start = date.fromisoformat(start_raw) if start_raw else None
+        end = date.fromisoformat(end_raw) if end_raw else None
+    except ValueError:
+        return None, None, f"{label} 的日期必须是 YYYY-MM-DD"
+    if (start is None) != (end is None):
+        return None, None, f"{label} 需要同时提供起止日期"
+    if start and end and start > end:
+        return None, None, f"{label} 的开始日期晚于结束日期"
+    return start, end, None
+
+
+@app.route("/compare")
+def compare_ranges():
+    """两个时间范围的汇总对比：返回各自的五维摘要，供前端做差值与雷达图。"""
+    if not session_state.get("client"):
+        return jsonify({"error": "请先点击“连接并获取 Token”完成授权"}), 401
+
+    s1, e1, err1 = _parse_two_dates(
+        request.args.get("start1"), request.args.get("end1"), "范围1")
+    if err1:
+        return jsonify({"error": err1}), 400
+    s2, e2, err2 = _parse_two_dates(
+        request.args.get("start2"), request.args.get("end2"), "范围2")
+    if err2:
+        return jsonify({"error": err2}), 400
+
+    activities = load_cache().get("activities", [])
+    sport_type = _parse_sport_type_arg()
+
+    def summary_for(start, end):
+        part = _filter_activities_by_range(activities, start, end)
+        part = _filter_activities_by_sport(part, sport_type)
+        return aggregate_activities(part)
+
+    return jsonify({
+        "range1": {
+            "start": s1.isoformat(), "end": e1.isoformat(),
+            "summary": summary_for(s1, e1),
+        },
+        "range2": {
+            "start": s2.isoformat(), "end": e2.isoformat(),
+            "summary": summary_for(s2, e2),
+        },
+    })
 
 
 @app.route("/training-load")

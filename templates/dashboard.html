@@ -34,17 +34,26 @@
             <aside class="sidebar-left">
                 <div class="menu-title">功能菜单</div>
                 <div class="menu-list">
-                    <button class="menu-item" data-route="chart" onclick="navigate('chart')">
+                    <button class="menu-item" data-route="chart" onclick="navigateMenu('chart')">
                         图表分析
                     </button>
-                    <button class="menu-item" data-route="activities" onclick="navigate('activities')">
+                    <button class="menu-item" data-route="activities" onclick="navigateMenu('activities')">
                         活动列表
                     </button>
-                    <button class="menu-item" data-route="training" onclick="navigate('training')">
+                    <button class="menu-item" data-route="training" onclick="navigateMenu('training')">
                         训练负荷
                     </button>
-                    <button class="menu-item" data-route="map" onclick="navigate('map')">
+                    <button class="menu-item" data-route="map" onclick="navigateMenu('map')">
                         线路热图
+                    </button>
+                    <button class="menu-item" data-route="records" onclick="navigateMenu('records')">
+                        个人纪录
+                    </button>
+                    <button class="menu-item" data-route="gear" onclick="navigateMenu('gear')">
+                        装备里程
+                    </button>
+                    <button class="menu-item" data-route="compare" onclick="navigateMenu('compare')">
+                        周期对比
                     </button>
                 </div>
             </aside>
@@ -107,6 +116,9 @@
     <script src="{{ url_for('static', filename='js/maps.js') }}"></script>
     <script src="{{ url_for('static', filename='js/segments.js') }}"></script>
     <script src="{{ url_for('static', filename='js/training.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/records.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/gear.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/compare.js') }}"></script>
     <script src="{{ url_for('static', filename='js/activities.js') }}"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>

@@ -185,6 +185,157 @@ class TestDateRangeArgs:
         assert api.get("/training-load?days=0").status_code == 400
 
 
+# ---------- /records 个人纪录 ----------
+
+def _fake_streams():
+    """均匀速度、恒定功率的假流数据：27 个采样点，每 100 秒前进 0.5 km。"""
+    return {
+        "time": [i * 100 for i in range(27)],
+        "distance_km": [round(i * 0.5, 2) for i in range(27)],
+        "watts": [250.0] * 27,
+        "has_watts": True,
+    }
+
+
+class TestRecords:
+    def test_requires_auth(self, anonymous_api):
+        assert anonymous_api.get("/records").status_code == 401
+
+    def test_invalid_range_rejected(self, api):
+        assert api.get("/records?start=bad").status_code == 400
+
+    def test_activity_level_records(self, api, fake_cache):
+        fake_cache["activities"].append(make_activity(
+            10, day=15, distance=60000, total_elevation_gain=1200,
+            moving_time=7200, average_watts=280, weighted_average_watts=300,
+            average_heartrate=165, suffer_score=150, average_speed=8.3,
+        ))
+        body = api.get("/records").get_json()
+        recs = {r["key"]: r for r in body["records"]}
+
+        assert recs["longest_distance"]["value"] == 60000
+        assert recs["longest_distance"]["display"] == "60.00 km"
+        assert recs["longest_distance"]["activity"]["id"] == 900010
+        assert recs["max_elevation"]["value"] == 1200
+        assert recs["longest_time"]["value"] == 7200
+        assert recs["max_avg_power"]["value"] == 280
+        assert recs["max_suffer"]["value"] == 150
+        assert recs["max_avg_speed"]["display"] == "29.9 km/h"
+        assert body["stream_records"] == []
+        assert body["stream_coverage"]["total"] == 4
+
+    def test_stream_records(self, api, monkeypatch):
+        streams = _fake_streams()
+        monkeypatch.setattr(
+            app_module, "load_streams_cache",
+            lambda aid: streams if aid == 900001 else None,
+        )
+        body = api.get("/records").get_json()
+        sr = {r["key"]: r for r in body["stream_records"]}
+
+        # 均匀 0.5km/100s → 最快 5K = 1000s，配速 3:20/km
+        assert sr["fastest_5k"]["value"] == 1000
+        assert sr["fastest_5k"]["pace"] == "3:20 /km"
+        assert sr["fastest_10k"]["value"] == 2000
+        assert sr["power_20min"]["value"] == 250.0
+        assert body["stream_coverage"] == {"checked": 1, "total": 3}
+
+    def test_stream_records_filtered_by_sport(self, api, monkeypatch):
+        monkeypatch.setattr(
+            app_module, "load_streams_cache",
+            lambda aid: _fake_streams() if aid == 900001 else None,
+        )
+        # 900001 是 Ride，sport_type=Run 时不参与统计
+        body = api.get("/records?sport_type=Run").get_json()
+        assert body["stream_records"] == []
+        assert body["stream_coverage"]["checked"] == 0
+
+
+# ---------- /gear/stats 装备里程 ----------
+
+GEAR_ATHLETE = {
+    "bikes": [
+        {"id": "b1", "name": "主战车", "distance": 2450000},
+        {"id": "b2", "name": "备件车", "distance": 0},
+    ],
+    "shoes": [{"id": "s1", "name": "训练鞋", "distance": 120000}],
+}
+
+
+class TestGearStats:
+    def test_requires_auth(self, anonymous_api):
+        assert anonymous_api.get("/gear/stats").status_code == 401
+
+    def test_gear_aggregation(self, api, monkeypatch):
+        monkeypatch.setattr(app_module, "get_cached_athlete", lambda: GEAR_ATHLETE)
+        body = api.get("/gear/stats").get_json()
+        items = {i["gear_id"]: i for i in body["items"]}
+
+        # 两条 Ride（21 + 23 km）挂 b1，一条 Run 挂 s1
+        assert items["b1"]["distance_km"] == 44.0
+        assert items["b1"]["count"] == 2
+        assert items["b1"]["type_label"] == "自行车"
+        assert items["b1"]["strava_total_km"] == 2450.0
+        assert items["b1"]["last_used"] == "2026-10-05T09:00:00"
+        assert items["s1"]["count"] == 1
+        assert items["b2"]["count"] == 0  # 无活动的装备也列出
+        assert items["b2"]["distance_km"] == 0.0
+        # 有使用记录的排前面
+        assert body["items"][0]["gear_id"] == "b1"
+
+    def test_gear_stats_respect_sport_filter(self, api, monkeypatch):
+        monkeypatch.setattr(app_module, "get_cached_athlete", lambda: GEAR_ATHLETE)
+        body = api.get("/gear/stats?sport_type=Run").get_json()
+        items = {i["gear_id"]: i for i in body["items"]}
+        assert items["s1"]["count"] == 1
+        assert items["b1"]["count"] == 0
+
+    def test_activities_gear_projection(self, api):
+        rows = api.get("/activities?fields=gear_id,name").get_json()
+        assert all(set(row.keys()) == {"id", "gear_id", "name"} for row in rows)
+        assert rows[0]["gear_id"] == "b1"
+
+
+# ---------- /compare 周期对比 ----------
+
+class TestCompare:
+    def test_requires_auth(self, anonymous_api):
+        assert anonymous_api.get("/compare").status_code == 401
+
+    def test_two_range_summary(self, api):
+        body = api.get(
+            "/compare?start1=2026-10-01&end1=2026-10-31"
+            "&start2=2026-09-01&end2=2026-09-30"
+        ).get_json()
+        assert body["range1"]["summary"]["count"] == 2
+        assert body["range1"]["summary"]["distance_km"] == 43.0
+        assert body["range2"]["summary"]["count"] == 1
+        assert "suffer_score" in body["range1"]["summary"]
+
+    def test_sport_filter_applies(self, api):
+        body = api.get(
+            "/compare?start1=2026-10-01&end1=2026-10-31"
+            "&start2=2026-09-01&end2=2026-09-30&sport_type=Run"
+        ).get_json()
+        assert body["range1"]["summary"]["count"] == 1
+        assert body["range2"]["summary"]["count"] == 0
+
+    def test_missing_end_rejected(self, api):
+        assert api.get("/compare?start1=2026-10-01&start2=2026-09-01&end2=2026-09-30").status_code == 400
+
+    def test_reversed_range_rejected(self, api):
+        assert api.get(
+            "/compare?start1=2026-10-10&end1=2026-10-01"
+            "&start2=2026-09-01&end2=2026-09-30"
+        ).status_code == 400
+
+    def test_bad_date_rejected(self, api):
+        assert api.get(
+            "/compare?start1=xx&end1=2026-10-01"
+            "&start2=2026-09-01&end2=2026-09-30"
+        ).status_code == 400
+
+
 # ---------- /athlete ----------
 
 class TestAthleteEndpoint:

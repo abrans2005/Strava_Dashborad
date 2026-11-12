@@ -86,180 +86,63 @@ function buildZonesPanel(zonesData) {
             }).join('');
         }
 
+        // 一行式运动员横幅：头像 + 名字 + 终身统计 + 心率区间速览（有数据才显示）
         function buildAthleteProfile(athlete, zonesData) {
             const fullName = escapeHtml(((athlete.firstname || '') + ' ' + (athlete.lastname || '')).trim()) || '运动员';
             const avatarUrl = athlete.profile_medium || athlete.profile || '';
             const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName)}&background=fc4c02&color=fff&size=200`;
-            const username = athlete.username ? `@${athlete.username}` : '';
-            const location = [athlete.city, athlete.state, athlete.country].filter(Boolean).join(', ') || '-';
-            const joined = athlete.created_at ? formatCreatedAt(athlete.created_at) : '-';
+            const location = [athlete.city, athlete.state, athlete.country].filter(Boolean).join(', ');
+            const joined = athlete.created_at ? formatCreatedAt(athlete.created_at) : '';
             const premiumBadge = athlete.premium
                 ? '<span class="athlete-badge premium">Premium</span>'
-                : '<span class="athlete-badge free">Free</span>';
+                : '';
 
-            const stats = [
-                { label: '体重', value: athlete.weight !== null && athlete.weight !== undefined ? athlete.weight.toFixed(1) + ' kg' : '-' },
-                { label: 'FTP', value: athlete.ftp !== null && athlete.ftp !== undefined ? athlete.ftp + ' W' : '-' },
-                { label: '关注者', value: athlete.follower_count !== null && athlete.follower_count !== undefined ? athlete.follower_count : '-' },
-                { label: '好友', value: athlete.friend_count !== null && athlete.friend_count !== undefined ? athlete.friend_count : '-' },
-                { label: '加入时间', value: joined },
-            ];
-
-            const statsHtml = stats.map(s => `
-                <div class="athlete-stat">
-                    <div class="label">${s.label}</div>
-                    <div class="value">${s.value}</div>
+            // 终身统计来自本地缓存的活动（未加载时不显示）
+            const acts = activitiesLoaded && Array.isArray(allActivities) ? allActivities : [];
+            const lifetimeHtml = acts.length ? `
+                <div class="profile-stat">
+                    <span class="v">${acts.length.toLocaleString()}</span>
+                    <span class="l">活动</span>
                 </div>
-            `).join('');
-
-            const bikes = Array.isArray(athlete.bikes) ? athlete.bikes : [];
-            const shoes = Array.isArray(athlete.shoes) ? athlete.shoes : [];
-
-            function buildGearSelectHtml(items, type, title) {
-                if (!items.length) {
-                    return `
-                        <div class="athlete-card">
-                            <div class="athlete-subsection-title">${title}</div>
-                            <div class="zone-empty" style="padding:12px 0;font-size:13px;">暂无${title}数据</div>
-                        </div>
-                    `;
-                }
-                const options = items.map((item, i) => {
-                    const name = escapeHtml(item.name || '-');
-                    const dist = item.distance !== null && item.distance !== undefined ? formatDistance(item.distance) : '-';
-                    const primaryTag = item.primary ? ' · 主用' : '';
-                    return `<option value="${i}">${name} (${dist})${primaryTag}</option>`;
-                }).join('');
-
-                const details = items.map((item, i) => {
-                    const name = escapeHtml(item.name || '-');
-                    const dist = item.distance !== null && item.distance !== undefined ? formatDistance(item.distance) : '-';
-                    const id = escapeHtml(item.id || '-');
-                    const primary = item.primary ? '是' : '否';
-                    return `
-                        <div class="gear-detail ${i === 0 ? '' : 'hidden'}" id="${type}-detail-${i}">
-                            <div><strong>名称：</strong>${name}</div>
-                            <div><strong>累计里程：</strong>${dist}</div>
-                            <div><strong>装备 ID：</strong>${id}</div>
-                            <div><strong>主用：</strong>${primary}</div>
-                        </div>
-                    `;
-                }).join('');
-
-                return `
-                    <div class="athlete-card">
-                        <div class="athlete-subsection-title">${title}</div>
-                        <select class="gear-select" onchange="updateGearDetail(this, '${type}')">
-                            ${options}
-                        </select>
-                        ${details}
-                    </div>
-                `;
-            }
-
-            function buildCompactZoneCard(zone) {
-                const type = zone.type || 'heart_rate';
-                const title = type === 'power' ? '功率区间' : '心率区间';
-                const unit = type === 'power' ? 'W' : 'bpm';
-                const buckets = zone.distribution_buckets
-                    .map((b, i) => ({ ...b, index: i }))
-                    .filter(b => b.max !== null || b.min !== null);
-                if (!buckets.length) {
-                    return `<div class="zone-card"><h3>${title}</h3><div class="zone-empty" style="font-size:13px;">暂无数据</div></div>`;
-                }
-                const definedMaxes = buckets.map(b => b.max).filter(v => v !== null && v !== undefined && v !== -1);
-                const globalMax = definedMaxes.length ? Math.max(...definedMaxes) : Math.max(...buckets.map(b => (b.min || 0)));
-                const tail = Math.max(type === 'power' ? 50 : 10, Math.round(globalMax * 0.08));
-                const displayBuckets = buckets.map(b => {
-                    const min = b.min !== null && b.min !== undefined ? b.min : 0;
-                    const hasMax = b.max !== null && b.max !== undefined && b.max !== -1;
-                    const max = hasMax ? b.max : (globalMax + tail);
-                    return { ...b, min, max, hasMax };
-                });
-                const minBase = Math.min(...displayBuckets.map(b => b.min));
-                const totalRange = Math.max(...displayBuckets.map(b => b.max)) - minBase;
-                const effectiveTotal = totalRange > 0 ? totalRange : 1;
-                const segments = displayBuckets.map((b, i) => {
-                    const width = ((b.max - b.min) / effectiveTotal) * 100;
-                    const color = zoneColors[i % zoneColors.length];
-                    const rangeText = b.hasMax ? `${b.min}-${b.max}` : `${b.min}+`;
-                    const label = width > 8 ? (b.hasMax ? String(b.max) : '+') : '';
-                    const timeText = b.time ? ' · 时间 ' + formatTimeSeconds(b.time) : '';
-                    return `<div class="zone-segment" style="flex:${Math.max(width, 1)};background:${color};" title="Z${i + 1}: ${rangeText} ${unit}${timeText}"><span class="segment-label">${label}</span></div>`;
-                }).join('');
-                const legend = displayBuckets.map((b, i) => {
-                    const color = zoneColors[i % zoneColors.length];
-                    const rangeText = b.hasMax ? `${b.min}-${b.max}` : `${b.min}+`;
-                    const timeText = b.time ? formatTimeSeconds(b.time) : '-';
-                    return `
-                        <div class="zone-legend-item">
-                            <div class="zone-dot" style="background:${color}"></div>
-                            <span>Z${i + 1}: ${rangeText}</span>
-                            <span class="zone-time">${timeText}</span>
-                        </div>
-                    `;
-                }).join('');
-                const note = zone.source === 'estimated'
-                    ? `<span style="font-size:11px;color:#3182ce;font-weight:600;margin-left:6px;">估算</span>`
-                    : (zone.custom_zones
-                        ? '<span style="font-size:11px;color:#fc4c02;font-weight:600;margin-left:6px;">自定义</span>'
-                        : '<span style="font-size:11px;color:#888;font-weight:600;margin-left:6px;">默认</span>');
-                return `
-                    <div class="zone-card">
-                        <h3>${title}${note}</h3>
-                        <div class="zone-bar">${segments}</div>
-                        <div class="zone-legend">${legend}</div>
-                    </div>
-                `;
-            }
-
-            const bikesHtml = buildGearSelectHtml(bikes, 'bike', '自行车');
-            const shoesHtml = buildGearSelectHtml(shoes, 'shoe', '跑鞋');
-
-            let zones = [];
-            if (Array.isArray(zonesData)) zones = zonesData;
-            const hrZone = zones.find(z => z && z.type === 'heart_rate' && Array.isArray(z.distribution_buckets) && z.distribution_buckets.length > 0);
-            const hrCard = hrZone ? buildCompactZoneCard(hrZone) : `<div class="zone-card"><h3>心率区间</h3><div class="zone-empty" style="font-size:13px;">暂无数据</div></div>`;
-
-            const gearHtml = `
-                <div class="athlete-gear-row">
-                    ${bikesHtml}
-                    ${shoesHtml}
-                    ${hrCard}
-                </div>
-            `;
-
-            const powerZones = zones.filter(z => z && z.type === 'power' && Array.isArray(z.distribution_buckets) && z.distribution_buckets.length > 0);
-            const extraZonesHtml = powerZones.length ? `
-                <div class="zones-panel" style="margin-top:18px;">
-                    ${powerZones.map(z => buildCompactZoneCard(z)).join('')}
+                <div class="profile-stat">
+                    <span class="v">${Math.round(acts.reduce((s, a) => s + (a.distance || 0), 0) / 1000).toLocaleString()} km</span>
+                    <span class="l">累计距离</span>
                 </div>
             ` : '';
 
+            // 心率区间速览 chips（无数据时整个隐藏）
+            const zones = Array.isArray(zonesData) ? zonesData : [];
+            const hrZone = zones.find(z => z && z.type === 'heart_rate'
+                && Array.isArray(z.distribution_buckets) && z.distribution_buckets.length > 0);
+            let zoneChipsHtml = '';
+            if (hrZone) {
+                const chips = hrZone.distribution_buckets
+                    .filter(b => b.max !== null || b.min !== null)
+                    .map((b, i) => {
+                        const hasMax = b.max !== null && b.max !== undefined && b.max !== -1;
+                        const rangeText = hasMax ? `${b.min}-${b.max}` : `${b.min || 0}+`;
+                        return `<span class="zone-chip"><i style="background:${zoneColors[i % zoneColors.length]}"></i>Z${i + 1} ${rangeText} bpm</span>`;
+                    }).join('');
+                zoneChipsHtml = `<div class="zone-chips">${chips}</div>`;
+            }
+
             return `
-                <div class="athlete-section">
-                    <div class="athlete-header">
-                        <img src="${escapeHtml(avatarUrl)}" alt="avatar" class="athlete-avatar" onerror="this.src='${fallbackAvatar}'">
-                        <div class="athlete-title">
-                            <div class="athlete-name">${fullName} ${premiumBadge}</div>
-                            ${username ? `<div class="athlete-username">${escapeHtml(username)}</div>` : ''}
-                            <div class="athlete-location">📍 ${escapeHtml(location)}</div>
-                            <div class="athlete-joined">加入时间：${joined}</div>
+                <div class="profile-banner">
+                    <img src="${escapeHtml(avatarUrl)}" alt="avatar" class="profile-avatar" onerror="this.src='${fallbackAvatar}'">
+                    <div class="profile-id">
+                        <div class="profile-name">${fullName} ${premiumBadge}
+                            <a class="profile-link" href="#/gear">装备里程 →</a>
                         </div>
+                        <div class="profile-meta">
+                            ${athlete.username ? '@' + escapeHtml(athlete.username) : ''}
+                            ${location ? ' · 📍 ' + escapeHtml(location) : ''}
+                            ${joined ? ' · 加入 ' + joined : ''}
+                        </div>
+                        ${zoneChipsHtml}
                     </div>
-                    <div class="athlete-stats">${statsHtml}</div>
-                    ${gearHtml}
-                    ${extraZonesHtml}
+                    <div class="profile-stats">${lifetimeHtml}</div>
                 </div>
             `;
-        }
-
-        function updateGearDetail(select, type) {
-            const parent = select.parentElement;
-            const details = parent.querySelectorAll('.gear-detail');
-            details.forEach(d => d.classList.add('hidden'));
-            const target = parent.querySelector('#' + type + '-detail-' + select.value);
-            if (target) target.classList.remove('hidden');
         }
 
         // --- 图表分析 ---
@@ -289,20 +172,18 @@ function buildZonesPanel(zonesData) {
         function buildChartControls() {
             // 年份/月份/运动类型已由顶部全局筛选栏接管，这里只保留图表自身指标
             const metricValue = currentRoute && currentRoute.params.metric ? currentRoute.params.metric : 'distance_km';
+            const chips = [
+                { key: 'count', label: '次数' },
+                { key: 'distance_km', label: '距离' },
+                { key: 'moving_time_hours', label: '时长' },
+                { key: 'elevation_gain_m', label: '爬升' },
+            ].map(c => `
+                <button class="metric-chip ${c.key === metricValue ? 'active' : ''}" data-metric="${c.key}">${c.label}</button>
+            `).join('');
 
             return `
                 <div id="athlete-profile-section"></div>
-                <div class="filter-bar">
-                    <div class="filter-group">
-                        <label for="chart-metric">指标</label>
-                        <select id="chart-metric">
-                            <option value="count" ${metricValue === 'count' ? 'selected' : ''}>运动次数</option>
-                            <option value="distance_km" ${metricValue === 'distance_km' ? 'selected' : ''}>距离 (km)</option>
-                            <option value="moving_time_hours" ${metricValue === 'moving_time_hours' ? 'selected' : ''}>移动时长 (h)</option>
-                            <option value="elevation_gain_m" ${metricValue === 'elevation_gain_m' ? 'selected' : ''}>爬升 (m)</option>
-                        </select>
-                    </div>
-                </div>
+                <div class="metric-chips" id="metric-chips">${chips}</div>
                 <div id="chart-summary" class="summary-cards"></div>
                 <div class="chart-card">
                     <div class="chart-wrapper">
@@ -416,10 +297,15 @@ function buildZonesPanel(zonesData) {
 
             await renderAthleteProfileSection();
 
-            // 指标切换：只更新 URL 参数与主图，不整页重载
-            document.getElementById('chart-metric').addEventListener('change', e => {
-                replaceParams({ metric: e.target.value });
-                fetchAndRenderStats(e.target.value);
+            // 指标切换：chips 高亮 + 只更新 URL 参数与主图，不整页重载
+            document.querySelectorAll('#metric-chips .metric-chip').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('#metric-chips .metric-chip').forEach(b => {
+                        b.classList.toggle('active', b === btn);
+                    });
+                    replaceParams({ metric: btn.dataset.metric });
+                    fetchAndRenderStats(btn.dataset.metric);
+                });
             });
 
             // 默认立即查询一次
@@ -473,24 +359,47 @@ function buildZonesPanel(zonesData) {
 
                 updateTopChartTitles(globalFilters.sport);
 
+                // 环比数据：本月 vs 上个自然月（运动类型跟随全局筛选，与对比页共用口径）
+                let monthCompare = null;
+                try {
+                    const month = monthRange(0), prev = monthRange(1);
+                    const sportQs = baseQs.filter(p => p.startsWith('sport_type='));
+                    const cmpRes = await fetch('/compare?' + [
+                        'start1=' + month.start, 'end1=' + month.end,
+                        'start2=' + prev.start, 'end2=' + prev.end,
+                        ...sportQs,
+                    ].join('&'));
+                    if (cmpRes.ok) monthCompare = await cmpRes.json();
+                } catch (e) { /* 环比失败不阻塞主图 */ }
+
+                const deltaRow = (cur, prev) => monthCompare
+                    ? `<div class="delta">较上月 ${deltaHtml(cur, prev)}</div>`
+                    : '';
+
                 const summaryEl = document.getElementById('chart-summary');
                 if (data.summary) {
+                    const m1 = monthCompare ? monthCompare.range1.summary : null;
+                    const m2 = monthCompare ? monthCompare.range2.summary : null;
                     summaryEl.innerHTML = `
                         <div class="metric-card">
                             <div class="label">运动次数</div>
                             <div class="value">${data.summary.count}</div>
+                            ${deltaRow(m1 && m1.count, m2 && m2.count)}
                         </div>
                         <div class="metric-card">
                             <div class="label">总距离</div>
                             <div class="value">${data.summary.distance_km} km</div>
+                            ${deltaRow(m1 && m1.distance_km, m2 && m2.distance_km)}
                         </div>
                         <div class="metric-card">
                             <div class="label">移动时长</div>
                             <div class="value">${data.summary.moving_time_hours} h</div>
+                            ${deltaRow(m1 && m1.moving_time_hours, m2 && m2.moving_time_hours)}
                         </div>
                         <div class="metric-card">
                             <div class="label">总爬升</div>
                             <div class="value">${data.summary.elevation_gain_m} m</div>
+                            ${deltaRow(m1 && m1.elevation_gain_m, m2 && m2.elevation_gain_m)}
                         </div>
                     `;
                 } else {

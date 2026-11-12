@@ -35,6 +35,7 @@ def make_activity(idx, sport="Ride", sport_type="Ride", day=1, month=10, year=20
         "weighted_average_watts": 200.0,
         "max_watts": 600.0,
         "kilojoules": 700.0,
+        "gear_id": "b1" if sport == "Ride" else "s1",
     }
     activity.update(overrides)
     return activity

@@ -82,8 +82,8 @@ function createChart(key, ctx, config) {
                         data: values,
                         backgroundColor: isLine ? gradient : 'rgba(252, 76, 2, 0.75)',
                         borderColor: '#fc4c02',
-                        borderWidth: 2,
-                        borderRadius: isLine ? 0 : 6,
+                        borderWidth: isLine ? 2 : 0,
+                        borderRadius: isLine ? 0 : 4,
                         borderSkipped: false,
                         fill: isLine,
                         tension: isLine ? 0.35 : 0,
@@ -98,17 +98,7 @@ function createChart(key, ctx, config) {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: {
-                            display: true,
-                            position: 'top',
-                            align: 'end',
-                            labels: {
-                                usePointStyle: true,
-                                pointStyle: 'circle',
-                                boxWidth: 8,
-                                font: { size: 12 }
-                            }
-                        },
+                        legend: { display: false },
                         tooltip: {
                             backgroundColor: 'rgba(40, 40, 40, 0.9)',
                             titleFont: { size: 13 },
@@ -172,10 +162,6 @@ function createChart(key, ctx, config) {
                 return;
             }
 
-            const gradient = ctx.createLinearGradient(0, 0, 0, 280);
-            gradient.addColorStop(0, 'rgba(252, 76, 2, 0.7)');
-            gradient.addColorStop(1, 'rgba(252, 76, 2, 0.15)');
-
             createChart('power', ctx, {
                 type: 'bar',
                 data: {
@@ -185,9 +171,10 @@ function createChart(key, ctx, config) {
                             type: 'line',
                             label: '正态分布拟合',
                             data: curve,
-                            borderColor: '#c23a00',
+                            borderColor: '#ef4444',
                             backgroundColor: 'transparent',
-                            borderWidth: 2,
+                            borderWidth: 1.5,
+                            borderDash: [6, 4],
                             pointRadius: 0,
                             pointHoverRadius: 4,
                             tension: 0.4,
@@ -198,9 +185,9 @@ function createChart(key, ctx, config) {
                             type: 'bar',
                             label: '活动时间',
                             data: hours,
-                            backgroundColor: gradient,
-                            borderColor: '#fc4c02',
-                            borderWidth: 1,
+                            backgroundColor: 'rgba(252, 76, 2, 0.5)',
+                            borderColor: 'transparent',
+                            borderWidth: 0,
                             borderRadius: 4,
                             borderSkipped: false,
                             yAxisID: 'y',
@@ -267,9 +254,7 @@ function createChart(key, ctx, config) {
                 return;
             }
 
-            const gradient = ctx.createLinearGradient(0, 0, 0, 280);
-            gradient.addColorStop(0, 'rgba(66, 153, 225, 0.7)');
-            gradient.addColorStop(1, 'rgba(66, 153, 225, 0.15)');
+            const gradient = 'rgba(66, 153, 225, 0.6)';
 
             createChart('hr', ctx, {
                 type: 'bar',
@@ -356,9 +341,10 @@ function createChart(key, ctx, config) {
             const labels = chartData.map(a => _truncateName(a.name));
             const values = chartData.map(a => a.total_elevation_gain || 0);
 
-            const gradient = ctx.createLinearGradient(0, 0, ctx.canvas.width, 0);
-            gradient.addColorStop(0, 'rgba(34, 197, 94, 0.55)');
-            gradient.addColorStop(1, 'rgba(34, 197, 94, 0.9)');
+            // 单色柱，第一名（反转后为最后一项）加深强调
+            const top1 = chartData.length - 1;
+            const barColors = chartData.map((_, i) =>
+                i === top1 ? 'rgba(22, 163, 74, 0.95)' : 'rgba(34, 197, 94, 0.45)');
 
             createChart('topElevation', ctx, {
                 type: 'bar',
@@ -367,9 +353,9 @@ function createChart(key, ctx, config) {
                     datasets: [{
                         label: '爬升 (m)',
                         data: values,
-                        backgroundColor: gradient,
-                        borderColor: '#16a34a',
-                        borderWidth: 1,
+                        backgroundColor: barColors,
+                        borderColor: 'transparent',
+                        borderWidth: 0,
                         borderRadius: 5,
                         borderSkipped: false
                     }]
@@ -421,9 +407,9 @@ function createChart(key, ctx, config) {
             const labels = chartData.map(a => _truncateName(a.name));
             const values = chartData.map(a => (a.distance || 0) / 1000);
 
-            const gradient = ctx.createLinearGradient(0, 0, ctx.canvas.width, 0);
-            gradient.addColorStop(0, 'rgba(252, 76, 2, 0.55)');
-            gradient.addColorStop(1, 'rgba(252, 76, 2, 0.9)');
+            const top1 = chartData.length - 1;
+            const barColors = chartData.map((_, i) =>
+                i === top1 ? 'rgba(252, 76, 2, 0.95)' : 'rgba(252, 76, 2, 0.45)');
 
             createChart('topDistance', ctx, {
                 type: 'bar',
@@ -432,9 +418,9 @@ function createChart(key, ctx, config) {
                     datasets: [{
                         label: '距离 (km)',
                         data: values,
-                        backgroundColor: gradient,
-                        borderColor: '#e04400',
-                        borderWidth: 1,
+                        backgroundColor: barColors,
+                        borderColor: 'transparent',
+                        borderWidth: 0,
                         borderRadius: 5,
                         borderSkipped: false
                     }]
