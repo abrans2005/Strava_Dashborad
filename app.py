@@ -612,6 +612,9 @@ def load_streams_cache(activity_id):
     # 早期缓存没有轨迹点，视为失效以便补全 GPS 数据
     if isinstance(data, dict) and "latlng" not in data:
         return None
+    # 爬坡检测算法升级后，旧结果（细碎假阳性段）需重新计算
+    if isinstance(data, dict) and data.get("climb_v") != CLIMB_ALGO_VERSION:
+        return None
     return data
 
 
@@ -746,35 +749,134 @@ def _analyze_hr_zones(heartrate, time_stream, hr_zones):
     return result
 
 
+CLIMB_GRADE_THRESHOLD = 5.0   # 平滑后坡度高于此值视为在爬坡 (%)
+CLIMB_GAP_GRADE = 3.0         # 间隔段平均坡度高于此值则合并（缓台）
+CLIMB_MAX_GAP_KM = 0.5        # 可合并的最大间隔 (km)
+CLIMB_MIN_DISTANCE_KM = 0.3   # 最短有效爬坡 (km)
+CLIMB_MIN_GAIN_M = 15.0       # 最小有效爬升 (m)
+CLIMB_ALGO_VERSION = 2        # 算法版本：升级后自动失效旧缓存
+
+
 def _find_climb_segments(distance_km, grade):
-    """找出坡度 > 5% 的连续爬坡段。"""
+    """检测有效爬坡段：平滑坡度 → 连续区间 → 合并缓台 → 过滤碎段。
+
+    相比逐点判断，这里对坡度噪声做三重防御：
+    1. 平滑坡度去单点尖峰；2. 短间隔缓台合并；3. 最小长度 + 最小爬升过滤。
+    返回字段含 avg_grade / max_grade / elevation_gain（坡度积分）。
+    """
     n = len(distance_km)
-    if n != len(grade):
+    if n != len(grade) or n < 3:
         return []
-    segments = []
+
+    smoothed = _moving_average(grade, window=5)
+    dists = [d if d is not None else 0 for d in distance_km]
+
+    # 1) 找平滑坡度 > 5% 的连续区间（按索引）
+    runs = []
     in_climb = False
-    start_km = 0
+    start_idx = 0
     for i in range(n):
-        if grade[i] is not None and grade[i] > 5:
+        g = smoothed[i]
+        if g is not None and g > CLIMB_GRADE_THRESHOLD:
             if not in_climb:
-                in_climb = True
-                start_km = distance_km[i]
-        else:
-            if in_climb:
-                end_km = distance_km[max(0, i - 1)]
-                segments.append({
-                    "start_km": round(start_km, 2),
-                    "end_km": round(end_km, 2),
-                    "distance_km": round(end_km - start_km, 2),
-                })
-                in_climb = False
+                in_climb, start_idx = True, i
+        elif in_climb:
+            runs.append((start_idx, i - 1))
+            in_climb = False
     if in_climb:
+        runs.append((start_idx, n - 1))
+
+    # 2) 合并间隔很短的区间（真实爬坡常有缓台，逐点检测会被切成碎段）
+    merged = []
+    for s, e in runs:
+        if merged:
+            ps, pe = merged[-1]
+            gap = dists[s] - dists[pe]
+            if 0 <= gap <= CLIMB_MAX_GAP_KM:
+                gap_vals = [g for g in smoothed[pe + 1:s] if g is not None]
+                if not gap_vals or sum(gap_vals) / len(gap_vals) > CLIMB_GAP_GRADE:
+                    merged[-1] = (ps, e)
+                    continue
+        merged.append((s, e))
+
+    # 3) 计算指标并按最小长度 / 最小爬升过滤无效碎段
+    segments = []
+    for s, e in merged:
+        start_km, end_km = dists[s], dists[e]
+        distance = end_km - start_km
+        if distance <= 0:
+            continue
+        gain = 0.0
+        weighted = 0.0
+        raw_grades = []
+        for i in range(s + 1, e + 1):
+            step_m = max(0.0, (dists[i] - dists[i - 1]) * 1000)
+            g = grade[i] if grade[i] is not None else 0.0
+            gain += step_m * g / 100
+            weighted += step_m * g
+            raw_grades.append(g)
+        if distance < CLIMB_MIN_DISTANCE_KM or gain < CLIMB_MIN_GAIN_M:
+            continue
         segments.append({
             "start_km": round(start_km, 2),
-            "end_km": round(distance_km[-1], 2),
-            "distance_km": round(distance_km[-1] - start_km, 2),
+            "end_km": round(end_km, 2),
+            "distance_km": round(distance, 2),
+            "avg_grade": round(weighted / (distance * 1000), 1),
+            "max_grade": round(max(raw_grades), 1) if raw_grades else 0.0,
+            "elevation_gain": int(round(gain)),
         })
     return segments
+
+
+def _hr_zone_hint(avg_hr):
+    """无流数据时，估算平均心率落在哪个心率区间。"""
+    if not avg_hr:
+        return None
+    zones = _get_hr_zones_from_athlete()
+    for i, z in enumerate(zones):
+        zmax = z.get("max")
+        if zmax is None or zmax < 0 or avg_hr < zmax:
+            return {"zone": i + 1, "total": len(zones)}
+    return {"zone": len(zones), "total": len(zones)}
+
+
+def _degraded_streams_response(activity_id):
+    """活动没有流数据时的降级响应：基于活动摘要的官方统计。
+
+    手动创建的活动、部分设备同步的活动在 Strava 上没有时间序列流，
+    此时返回活动摘要中的心率/功率/速度指标与心率区间定位，而不是直接报错。
+    """
+    activity = _find_activity_meta(activity_id)
+    if not activity:
+        return None
+
+    def _kmh(v):
+        return round(v * 3.6, 1) if v else None
+
+    def _watts(a):
+        return a.get("weighted_average_watts") or a.get("average_watts")
+
+    print(f"[/activities/{activity_id}/streams] 无流数据，降级为摘要模式")
+    return {
+        "activity_id": activity_id,
+        "distance_km": [], "altitude": [], "heartrate": [], "velocity_kmh": [],
+        "watts": [], "grade": [], "time": [], "latlng": [],
+        "summary": {
+            "avg_heartrate": activity.get("average_heartrate"),
+            "max_heartrate": activity.get("max_heartrate"),
+            "avg_velocity_kmh": _kmh(activity.get("average_speed")),
+            "max_velocity_kmh": _kmh(activity.get("max_speed")),
+            "avg_watts": _watts(activity),
+            "max_watts": activity.get("max_watts"),
+            "climb_segments": [],
+        },
+        "hr_zone_stats": [],
+        "hr_zone_hint": _hr_zone_hint(activity.get("average_heartrate")),
+        "has_hr": activity.get("average_heartrate") is not None,
+        "has_watts": _watts(activity) is not None,
+        "has_gps": False,
+        "degraded": True,
+    }
 
 
 @app.route("/activities/<int:activity_id>/streams")
@@ -808,6 +910,10 @@ def get_activity_streams(activity_id):
     except requests.exceptions.RequestException as e:
         print(f"[/activities/{activity_id}/streams] 调用失败: {e}")
         traceback.print_exc()
+        # 活动存在时降级为摘要模式，而不是直接报错
+        degraded = _degraded_streams_response(activity_id)
+        if degraded is not None:
+            return jsonify(degraded)
         return jsonify({"error": f"调用 Strava 失败: {e}"}), 500
 
     # raw 可能是数组或对象（key_by_type=true 时为对象）
@@ -830,6 +936,10 @@ def get_activity_streams(activity_id):
 
     n = len(distance_raw) if distance_raw else 0
     if n == 0:
+        # 手动创建等活动没有流数据：降级为摘要模式
+        degraded = _degraded_streams_response(activity_id)
+        if degraded is not None:
+            return jsonify(degraded)
         return jsonify({"error": "Strava 返回的流数据为空"}), 404
 
     # 对齐长度（某些流序列可能比 distance 短）
@@ -903,6 +1013,7 @@ def get_activity_streams(activity_id):
             "min_altitude": round(min([a for a in altitude if a is not None]), 1) if any(a is not None for a in altitude) else None,
             "climb_segments": climb_segments,
         },
+        "climb_v": CLIMB_ALGO_VERSION,
         "hr_zone_stats": hr_zone_stats,
         "has_hr": any(h is not None for h in heartrate),
         "has_watts": any(w is not None for w in watts),
@@ -1464,7 +1575,8 @@ def power_distribution():
     weighted_var = sum(t * (v - weighted_mean) ** 2 for v, t in items) / total_time
     std = math.sqrt(weighted_var)
 
-    bin_width = 25  # 功率区间宽度（W）
+    # 区间宽度自适应：样本少时用 50W，避免图表只有零星几根柱
+    bin_width = 50 if len(items) < 20 else 25
     values_only = [v for v, _ in items]
     min_v = min(values_only)
     max_v = max(values_only)
@@ -1510,7 +1622,48 @@ def power_distribution():
         "curve": curve,
         "mean": round(weighted_mean, 1),
         "std": round(std, 1),
+        # 连续正态曲线绘制所需参数（前端按公式采样）
+        "bin_width": bin_width,
+        "bin_start": start,
+        "total_hours": round(total_hours, 2),
     })
+
+
+def _chart_hr_zones():
+    """图表用心率区间：优先运动员自定义区间，回退固定五区。
+
+    返回 [{"zone": 1, "label": "Z1 · <120", "min": 0, "max": 120}, ...]
+    """
+    buckets = _get_hr_zones_from_athlete()
+    zones = []
+    for b in buckets:
+        zmax = b.get("max")
+        if zmax is not None and zmax < 0:
+            zmax = None
+        zones.append({
+            "min": int(b.get("min") or 0),
+            "max": int(zmax) if zmax is not None else None,
+        })
+
+    if not zones:
+        zones = [
+            {"min": 0, "max": 120},
+            {"min": 120, "max": 140},
+            {"min": 140, "max": 160},
+            {"min": 160, "max": 180},
+            {"min": 180, "max": None},
+        ]
+
+    total = len(zones)
+    for i, z in enumerate(zones):
+        z["zone"] = i + 1
+        if i == 0 and z["max"] is not None:
+            z["label"] = f"Z1 · <{z['max']}"
+        elif z["max"] is None:
+            z["label"] = f"Z{total} · >{z['min']}"
+        else:
+            z["label"] = f"Z{i + 1} · {z['min']}-{z['max']}"
+    return zones
 
 
 @app.route("/chart/hr-zones")
@@ -1533,13 +1686,7 @@ def hr_zones():
         if a.get("average_heartrate") is not None
     ]
 
-    zones = [
-        {"label": "<120 bpm", "min": 0, "max": 120},
-        {"label": "120-140 bpm", "min": 120, "max": 140},
-        {"label": "140-160 bpm", "min": 140, "max": 160},
-        {"label": "160-180 bpm", "min": 160, "max": 180},
-        {"label": ">180 bpm", "min": 180, "max": None},
-    ]
+    zones = _chart_hr_zones()
 
     zone_seconds = [0] * len(zones)
     counts = [0] * len(zones)
@@ -1550,10 +1697,18 @@ def hr_zones():
                 counts[i] += 1
                 break
 
+    hours = [round(s / 3600, 2) for s in zone_seconds]
+    total_hours = sum(hours)
+    pct = [round(h / total_hours * 100) if total_hours else 0 for h in hours]
+
     return jsonify({
         "labels": [z["label"] for z in zones],
-        "hours": [round(s / 3600, 2) for s in zone_seconds],
+        "hours": hours,
         "counts": counts,
+        "pct": pct,
+        "total_hours": round(total_hours, 2),
+        # Z1+Z2（有氧区）时间占比，用于图表副标题
+        "pct_low": sum(pct[:2]),
     })
 
 
@@ -1657,7 +1812,11 @@ def load_route_cache(activity_id):
     cache = _read_json(_route_cache_path(activity_id))
     if not isinstance(cache, dict) or cache.get("athlete_id") != _current_athlete_id():
         return None
-    return cache.get("data")
+    data = cache.get("data")
+    # 爬坡检测算法升级后，轨迹缓存里的 climbs 需重建
+    if isinstance(data, dict) and data.get("climb_v") != CLIMB_ALGO_VERSION:
+        return None
+    return data
 
 
 def save_route_cache(activity_id, data):
@@ -1702,7 +1861,8 @@ def _build_route_data(activity, latlng, distance_m, grade):
         grades.append(round(float(g), 1) if g is not None else None)
 
     if len(points) < 2:
-        return dict(meta, points=[], grades=[], distances_km=[], climbs=[], has_gps=False)
+        return dict(meta, points=[], grades=[], distances_km=[], climbs=[],
+                    climb_v=CLIMB_ALGO_VERSION, has_gps=False)
 
     points, distances, grades = _downsample([points, distances, grades], ROUTE_MAX_POINTS)
     climbs = _find_climb_segments(
@@ -1714,6 +1874,7 @@ def _build_route_data(activity, latlng, distance_m, grade):
         grades=grades,
         distances_km=distances,
         climbs=climbs,
+        climb_v=CLIMB_ALGO_VERSION,
         has_gps=True,
     )
 

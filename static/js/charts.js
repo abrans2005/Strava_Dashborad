@@ -149,12 +149,91 @@ function createChart(key, ctx, config) {
             createChart('main', ctx, cfg);
         }
 
+        // ===== 分布图通用插件 =====
+
+        // 柱顶数值：直接标在每根柱子上方，不用 hover 才能读
+        function _barTopValuePlugin(datasetIndex, formatter) {
+            return {
+                id: 'barTopValue' + datasetIndex,
+                afterDatasetsDraw(chart) {
+                    const meta = chart.getDatasetMeta(datasetIndex);
+                    const ds = chart.data.datasets[datasetIndex];
+                    if (!meta || !ds || !Array.isArray(ds.data)) return;
+                    const { ctx } = chart;
+                    ctx.save();
+                    ctx.font = '600 10px -apple-system, "PingFang SC", sans-serif';
+                    ctx.fillStyle = '#8a919c';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    meta.data.forEach((el, i) => {
+                        const v = Number(ds.data[i]);
+                        if (!v) return;
+                        ctx.fillText(formatter(v, i), el.x, el.y - 4);
+                    });
+                    ctx.restore();
+                }
+            };
+        }
+
+        // 连续正态分布曲线：按公式在 120 个采样点上绘制（淡红填充 + 虚线）
+        // 用连续采样替代「每个区间一个点」的折线，避免少量桶时的失真弧线
+        function _normalCurvePlugin(opts) {
+            return {
+                id: 'normalCurve',
+                beforeDatasetsDraw(chart) {
+                    const { mean, std, binStart, binWidth, totalHours } = opts || {};
+                    if (!mean || !std || std <= 0 || !totalHours) return;
+                    const n = (chart.data.labels || []).length;
+                    if (n < 5) return; // 桶太少时拟合无意义，直接不画
+
+                    const { ctx, chartArea, scales } = chart;
+                    const x = scales.x;
+                    const y = scales.y;
+                    const px0 = x.getPixelForValue(0);
+                    const span = x.getPixelForValue(n - 1) - px0;
+                    const coef = 1 / (std * Math.sqrt(2 * Math.PI));
+                    const clampY = py => Math.max(chartArea.top, Math.min(chartArea.bottom, py));
+
+                    const pts = [];
+                    const steps = 120;
+                    for (let i = 0; i <= steps; i++) {
+                        const binIdx = (i / steps) * (n - 1);
+                        const watts = binStart + (binIdx + 0.5) * binWidth;
+                        const hours = coef * Math.exp(-((watts - mean) ** 2) / (2 * std * std))
+                            * totalHours * binWidth;
+                        pts.push([px0 + (binIdx / (n - 1)) * span, clampY(y.getPixelForValue(hours))]);
+                    }
+
+                    ctx.save();
+                    // 面积填充
+                    ctx.beginPath();
+                    ctx.moveTo(pts[0][0], chartArea.bottom);
+                    pts.forEach(([px, py]) => ctx.lineTo(px, py));
+                    ctx.lineTo(pts[pts.length - 1][0], chartArea.bottom);
+                    ctx.closePath();
+                    ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+                    ctx.fill();
+                    // 曲线
+                    ctx.beginPath();
+                    pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+                    ctx.strokeStyle = 'rgba(239, 68, 68, 0.65)';
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([5, 4]);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            };
+        }
+
+        function _formatHours(h) {
+            return h >= 10 ? Math.round(h) + 'h' : Number(h).toFixed(1) + 'h';
+        }
+
         function renderPowerDist(data) {
             const ctx = document.getElementById('powerDistCanvas').getContext('2d');
             const labels = data.labels || [];
             const hours = (data.hours || []).map(v => Number(v) || 0);
             const counts = (data.counts || []).map(v => Number(v) || 0);
-            const curve = (data.curve || []).map(v => Number(v) || 0);
 
             if (!labels.length) {
                 // 没有功率数据时清空画布
@@ -162,49 +241,29 @@ function createChart(key, ctx, config) {
                 return;
             }
 
+            const totalHours = Number(data.total_hours) || hours.reduce((s, v) => s + v, 0);
+
             createChart('power', ctx, {
                 type: 'bar',
                 data: {
                     labels: labels,
-                    datasets: [
-                        {
-                            type: 'line',
-                            label: '正态分布拟合',
-                            data: curve,
-                            borderColor: '#ef4444',
-                            backgroundColor: 'transparent',
-                            borderWidth: 1.5,
-                            borderDash: [6, 4],
-                            pointRadius: 0,
-                            pointHoverRadius: 4,
-                            tension: 0.4,
-                            yAxisID: 'y',
-                            order: 1
-                        },
-                        {
-                            type: 'bar',
-                            label: '活动时间',
-                            data: hours,
-                            backgroundColor: 'rgba(252, 76, 2, 0.5)',
-                            borderColor: 'transparent',
-                            borderWidth: 0,
-                            borderRadius: 4,
-                            borderSkipped: false,
-                            yAxisID: 'y',
-                            order: 2
-                        }
-                    ]
+                    datasets: [{
+                        label: '活动时间',
+                        data: hours,
+                        backgroundColor: 'rgba(252, 76, 2, 0.55)',
+                        hoverBackgroundColor: 'rgba(252, 76, 2, 0.85)',
+                        borderColor: 'transparent',
+                        borderWidth: 0,
+                        borderRadius: 4,
+                        borderSkipped: false
+                    }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    layout: { padding: { top: 18 } },
                     plugins: {
-                        legend: {
-                            display: true,
-                            position: 'top',
-                            align: 'end',
-                            labels: { usePointStyle: true, boxWidth: 8, font: { size: 12 } }
-                        },
+                        legend: { display: false },
                         tooltip: {
                             backgroundColor: 'rgba(40, 40, 40, 0.9)',
                             titleFont: { size: 13 },
@@ -215,12 +274,10 @@ function createChart(key, ctx, config) {
                                 title: (ctx) => '功率区间: ' + (ctx[0] ? ctx[0].label : ''),
                                 label: (ctx) => {
                                     const idx = ctx.dataIndex;
-                                    if (ctx.dataset.type === 'line') {
-                                        return `正态分布拟合: ${ctx.parsed.y} h`;
-                                    }
                                     const count = counts[idx] !== undefined ? counts[idx] : '-';
+                                    const pct = totalHours ? Math.round(hours[idx] / totalHours * 100) : 0;
                                     return [
-                                        `活动时间: ${ctx.parsed.y} h`,
+                                        `活动时间: ${ctx.parsed.y} h（${pct}%）`,
                                         `活动数量: ${count}`
                                     ];
                                 }
@@ -230,7 +287,7 @@ function createChart(key, ctx, config) {
                     scales: {
                         x: {
                             grid: { display: false },
-                            ticks: { color: '#666', font: { size: 11 } }
+                            ticks: { maxRotation: 0, color: '#666', font: { size: 11 } }
                         },
                         y: {
                             beginAtZero: true,
@@ -239,7 +296,17 @@ function createChart(key, ctx, config) {
                             title: { display: true, text: '活动时间 (h)', color: '#999', font: { size: 12 } }
                         }
                     }
-                }
+                },
+                plugins: [
+                    _normalCurvePlugin({
+                        mean: Number(data.mean) || 0,
+                        std: Number(data.std) || 0,
+                        binStart: Number(data.bin_start) || 0,
+                        binWidth: Number(data.bin_width) || 25,
+                        totalHours: totalHours
+                    }),
+                    _barTopValuePlugin(0, v => _formatHours(v))
+                ]
             });
         }
 
@@ -248,13 +315,17 @@ function createChart(key, ctx, config) {
             const labels = data.labels || [];
             const hours = (data.hours || []).map(v => Number(v) || 0);
             const counts = (data.counts || []).map(v => Number(v) || 0);
+            const pct = data.pct || [];
 
             if (!labels.length) {
                 ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
                 return;
             }
 
-            const gradient = 'rgba(66, 153, 225, 0.6)';
+            // Z1-Z5 语义色：与分析页心率区间条保持一致（蓝→绿→黄→橙→红）
+            const zoneColors = ['#3b82f6', '#22c55e', '#eab308', '#f97316', '#ef4444'];
+            const colors = labels.map((_, i) => zoneColors[i % zoneColors.length]);
+            const totalHours = Number(data.total_hours) || hours.reduce((s, v) => s + v, 0);
 
             createChart('hr', ctx, {
                 type: 'bar',
@@ -263,9 +334,10 @@ function createChart(key, ctx, config) {
                     datasets: [{
                         label: '活动时间',
                         data: hours,
-                        backgroundColor: gradient,
-                        borderColor: '#3182ce',
-                        borderWidth: 1,
+                        backgroundColor: colors.map(c => c + 'cc'),
+                        hoverBackgroundColor: colors,
+                        borderColor: 'transparent',
+                        borderWidth: 0,
                         borderRadius: 6,
                         borderSkipped: false
                     }]
@@ -273,6 +345,7 @@ function createChart(key, ctx, config) {
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    layout: { padding: { top: 18 } },
                     plugins: {
                         legend: { display: false },
                         tooltip: {
@@ -286,8 +359,11 @@ function createChart(key, ctx, config) {
                                 label: (ctx) => {
                                     const idx = ctx.dataIndex;
                                     const count = counts[idx] !== undefined ? counts[idx] : '-';
+                                    const share = pct[idx] !== undefined
+                                        ? pct[idx]
+                                        : (totalHours ? Math.round(hours[idx] / totalHours * 100) : 0);
                                     return [
-                                        `活动时间: ${ctx.parsed.y} h`,
+                                        `活动时间: ${ctx.parsed.y} h（${share}%）`,
                                         `活动数量: ${count}`
                                     ];
                                 }
@@ -297,7 +373,7 @@ function createChart(key, ctx, config) {
                     scales: {
                         x: {
                             grid: { display: false },
-                            ticks: { color: '#666', font: { size: 12 } }
+                            ticks: { maxRotation: 0, color: '#666', font: { size: 11 } }
                         },
                         y: {
                             beginAtZero: true,
@@ -306,7 +382,8 @@ function createChart(key, ctx, config) {
                             title: { display: true, text: '活动时间 (h)', color: '#999', font: { size: 12 } }
                         }
                     }
-                }
+                },
+                plugins: [_barTopValuePlugin(0, v => _formatHours(v))]
             });
         }
 
@@ -440,33 +517,49 @@ function createChart(key, ctx, config) {
             const altitudes = (data.altitude || []).map(v => Number(v) || 0);
             const gradient = _mkAnalysisGradient(ctx, 'rgba(34, 197, 94, 0.5)', 'rgba(34, 197, 94, 0.05)');
             const climbs = (data.summary && data.summary.climb_segments) || [];
+            // 段数仍很多时不画底纹（会把剖面刷成斑马纹），改用一条淡坡度线兜底
+            const manyClimbs = climbs.length > 6;
+            const datasets = [{
+                label: '海拔 (m)',
+                data: altitudes,
+                borderColor: '#16a34a',
+                backgroundColor: gradient,
+                borderWidth: 2,
+                fill: true,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                tension: 0.3
+            }];
+            const scales = {
+                x: { grid: { display: false }, ticks: { maxTicksLimit: 10, maxRotation: 0, color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
+                y: { beginAtZero: false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '海拔 (m)', color: '#999', font: { size: 12 } } }
+            };
+            if (manyClimbs) {
+                datasets.push({
+                    label: '坡度 (%)',
+                    data: (data.grade || []).map(v => Number(v) || 0),
+                    borderColor: 'rgba(148, 163, 184, 0.9)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1,
+                    pointRadius: 0,
+                    pointHoverRadius: 3,
+                    tension: 0.3,
+                    fill: false,
+                    yAxisID: 'yGrade'
+                });
+                scales.yGrade = { display: false, min: 0, max: 20 };
+            }
             createChart('analysis:elevation', ctx, {
                 type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: '海拔 (m)',
-                        data: altitudes,
-                        borderColor: '#16a34a',
-                        backgroundColor: gradient,
-                        borderWidth: 2,
-                        fill: true,
-                        pointRadius: 0,
-                        pointHoverRadius: 4,
-                        tension: 0.3
-                    }]
-                },
+                data: { labels: labels, datasets: datasets },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
                     plugins: { legend: { display: false } },
-                    scales: {
-                        x: { grid: { display: false }, ticks: { maxTicksLimit: 10, maxRotation: 0, color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
-                        y: { beginAtZero: false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '海拔 (m)', color: '#999', font: { size: 12 } } }
-                    }
+                    scales: scales
                 },
-                plugins: [_climbBandPlugin(climbs, data.distance_km || [])]
+                plugins: manyClimbs ? [] : [_climbBandPlugin(climbs, data.distance_km || [])]
             });
         }
 

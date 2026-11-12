@@ -438,12 +438,20 @@ function buildZonesPanel(zonesData) {
                     const samples = (powerData.counts || []).reduce((s, v) => s + (Number(v) || 0), 0);
                     const powerTitle = document.getElementById('power-dist-title');
                     if (powerTitle) {
-                        // 先清掉上一轮的角标，样本 < 5 时重新插入
-                        powerTitle.querySelector('.sample-badge')?.remove();
-                        if (samples < 5) {
-                            powerTitle.insertAdjacentHTML(
-                                'beforeend', '<span class="sample-badge">样本不足</span>');
-                        }
+                        const sub = powerData.mean != null
+                            ? ` <span class="chart-sub">加权平均 ${powerData.mean} W · σ ${powerData.std} · ${samples} 次</span>`
+                            : '';
+                        const badge = samples < 5 ? '<span class="sample-badge">样本不足</span>' : '';
+                        powerTitle.innerHTML = `平均功率分布${sub}${badge}`;
+                    }
+                }
+                if (hrHasData) {
+                    const hrTitle = document.getElementById('hr-zone-title');
+                    if (hrTitle) {
+                        const sub = hrData.pct_low != null && hrData.total_hours
+                            ? ` <span class="chart-sub">${hrData.pct_low}% 时间在 Z1-Z2 有氧区</span>`
+                            : '';
+                        hrTitle.innerHTML = `心率区间分布${sub}`;
                     }
                 }
 

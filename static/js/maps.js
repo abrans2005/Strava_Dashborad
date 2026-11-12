@@ -135,8 +135,20 @@
             });
         }
 
+        // 爬坡段 tooltip：起止 / 平均坡度 / 爬升，一段一行
+        function _climbLabel(climb, index) {
+            const parts = [`${climb.start_km}-${climb.end_km} km`];
+            if (climb.avg_grade !== undefined && climb.avg_grade !== null) parts.push(`平均 ${climb.avg_grade}%`);
+            if (climb.max_grade !== undefined && climb.max_grade !== null) parts.push(`最大 ${climb.max_grade}%`);
+            if (climb.elevation_gain !== undefined && climb.elevation_gain !== null) parts.push(`+${climb.elevation_gain} m`);
+            return `爬坡 ${index + 1}<br>${parts.join(' · ')}`;
+        }
+
+        // 爬坡段高亮：只画高亮线；段数少时加点位编号徽章，多时不再叠加任何点
         function drawClimbHighlights(map, points, distances, climbs) {
-            (climbs || []).forEach(climb => {
+            const list = climbs || [];
+            const showBadges = list.length > 0 && list.length <= 5;
+            list.forEach((climb, idx) => {
                 const coords = [];
                 for (let i = 0; i < points.length; i++) {
                     const d = distances ? distances[i] : null;
@@ -146,17 +158,22 @@
                 if (coords.length < 2) return;
                 L.polyline(coords, {
                     color: ROUTE_COLOR_DEEP,
-                    weight: 9,
-                    opacity: 0.28,
+                    weight: 8,
+                    opacity: 0.3,
                     lineCap: 'round'
-                }).addTo(map).bindTooltip(`爬坡 ${climb.start_km}-${climb.end_km} km`, { sticky: true });
-                L.circleMarker(coords[0], {
-                    radius: 5,
-                    color: ROUTE_COLOR_DEEP,
-                    fillColor: ROUTE_COLOR,
-                    fillOpacity: 1,
-                    weight: 2
-                }).addTo(map).bindTooltip(`爬坡起点 ${climb.start_km} km`, { direction: 'top' });
+                }).addTo(map).bindTooltip(_climbLabel(climb, idx), { sticky: true });
+
+                if (!showBadges) return;
+                L.marker(coords[0], {
+                    icon: L.divIcon({
+                        className: 'climb-badge-icon',
+                        html: `<span>${idx + 1}</span>`,
+                        iconSize: [22, 22],
+                        iconAnchor: [11, 11],
+                    }),
+                    interactive: true,
+                    zIndexOffset: 500,
+                }).addTo(map).bindTooltip(_climbLabel(climb, idx), { direction: 'top' });
             });
         }
 
