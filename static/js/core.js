@@ -214,5 +214,8 @@ let activityFilters = {
     keyword: '',
 };
 
+// 活动列表排序状态（key=排序字段，order=asc/desc，默认时间倒序）
+let activitySort = { key: 'date', order: 'desc' };
+
 // 赛段分析状态
 let currentSegmentActivityId = null;

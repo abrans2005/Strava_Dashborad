@@ -95,8 +95,34 @@ function formatSyncTime(iso) {
             }
         }
 
+        // ---------- 侧边菜单折叠（收起为图标栏，状态持久化） ----------
+        const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
+
+        function applySidebarState(collapsed) {
+            document.querySelector('.body')?.classList.toggle('sidebar-collapsed', collapsed);
+            const btn = document.getElementById('menu-toggle');
+            if (btn) {
+                btn.textContent = collapsed ? '›' : '‹';
+                btn.title = collapsed ? '展开菜单' : '收起菜单';
+            }
+        }
+
+        function toggleSidebar() {
+            const bodyEl = document.querySelector('.body');
+            const collapsed = !bodyEl.classList.contains('sidebar-collapsed');
+            try {
+                localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0');
+            } catch (e) { /* 隐私模式下忽略 */ }
+            applySidebarState(collapsed);
+        }
+
         // 页面加载后按当前 hash 打开对应页面（无 hash 默认图表分析）
         document.addEventListener('DOMContentLoaded', () => {
+            let savedCollapsed = false;
+            try {
+                savedCollapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+            } catch (e) { /* 隐私模式下忽略 */ }
+            applySidebarState(savedCollapsed);
             initGlobalFilterBar();
             loadHeaderProfile();
             if (!location.hash) history.replaceState(null, '', '#/chart');

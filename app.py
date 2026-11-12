@@ -20,6 +20,18 @@ from stravalib import Client
 
 app = Flask(__name__)
 
+
+def _asset_v(filename):
+    """静态资源版本号（文件 mtime），用于浏览器缓存破坏。"""
+    import os as _os
+    try:
+        return int(_os.path.getmtime(_os.path.join(app.static_folder, filename)))
+    except OSError:
+        return 0
+
+
+app.jinja_env.globals["asset_v"] = _asset_v
+
 DEFAULT_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID", "").strip()
 DEFAULT_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "").strip()
 PORT = int(os.environ.get("PORT", "5001"))

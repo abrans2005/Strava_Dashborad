@@ -141,56 +141,130 @@ function buildScrollableTable(html) {
             renderActivityPage(false);
         }
 
-        function buildActivityTable(activities) {
-            const rows = activities.map(a => `
-                <tr data-activity-id="${a.id}" class="${String(a.id) === String(lastAnalyzedActivityId) ? 'analyzing' : ''}">
-                    <td>${escapeHtml(a.id)}</td>
-                    <td>${escapeHtml(a.name)}</td>
-                    <td>${escapeHtml(a.type)}</td>
-                    <td>${escapeHtml(a.sport_type)}</td>
-                    <td>${formatActivityDate(a)}</td>
-                    <td class="text-right">${formatDistance(a.distance)}</td>
-                    <td class="text-right">${formatTime(a.moving_time)}</td>
+        // ---------- 活动表格：图标 / 合并列 / 排序 / 行操作 ----------
+
+        const ACTIVITY_TYPE_ICONS = {
+            Ride: '🚴', VirtualRide: '⚡', GravelRide: '🚵', MountainBikeRide: '🚵',
+            Run: '🏃', TrailRun: '🏃', Treadmill: '🏃', Walk: '🚶', Hike: '🥾',
+            Swim: '🏊', Rowing: '🚣', Snowboard: '🏂', Snowshoe: '🎿',
+            Skateboard: '🛹', Yoga: '🧘', WeightTraining: '🏋️', Elliptical: '🌀',
+        };
+
+        const ACTIVITY_SORT_KEYS = {
+            date: a => { const d = activityStartDate(a); return d ? d.getTime() : 0; },
+            distance: a => a.distance || 0,
+            moving_time: a => a.moving_time || 0,
+            elevation: a => a.total_elevation_gain || 0,
+            avg_speed: a => a.average_speed || 0,
+            avg_hr: a => a.average_heartrate || 0,
+            power: a => (a.weighted_average_watts || a.average_watts) || 0,
+            suffer: a => a.suffer_score || 0,
+        };
+
+        function sortActivityBy(key) {
+            if (activitySort.key === key) {
+                activitySort.order = activitySort.order === 'desc' ? 'asc' : 'desc';
+            } else {
+                activitySort = { key, order: 'desc' };
+            }
+            replaceParams({ sort: activitySort.key, order: activitySort.order });
+            renderActivityPage(false);
+        }
+
+        function openActivityOnMap(id) {
+            // 带上全局筛选并定位该活动：热图页会高亮这条轨迹
+            const params = {};
+            GLOBAL_PARAM_KEYS.forEach(k => {
+                if (currentRoute && currentRoute.params[k]) params[k] = currentRoute.params[k];
+            });
+            params.focus = id;
+            navigate('map', params);
+        }
+
+        function _sortTh(label, key, extraCls) {
+            const active = activitySort.key === key;
+            const arrow = active
+                ? `<span class="sort-arrow">${activitySort.order === 'asc' ? '▲' : '▼'}</span>`
+                : '';
+            return `<th class="sortable ${extraCls || ''}${active ? ' sorted' : ''}" onclick="sortActivityBy('${key}')">${label}${arrow}</th>`;
+        }
+
+        function _duo(main, sub, extraCls) {
+            return `<td class="cell-duo ${extraCls || ''}"><span class="main">${main}</span><span class="sub">${sub}</span></td>`;
+        }
+
+        function _dateDuoCell(a) {
+            const d = activityStartDate(a);
+            if (!d) return '<td class="cell-duo"><span class="main">-</span></td>';
+            const sameYear = d.getFullYear() === new Date().getFullYear();
+            const main = sameYear
+                ? `${d.getMonth() + 1}/${d.getDate()}`
+                : `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+            const hh = String(d.getHours()).padStart(2, '0');
+            const mm = String(d.getMinutes()).padStart(2, '0');
+            return _duo(main, `${hh}:${mm}`);
+        }
+
+        function buildActivityTable(activities, columnFlags) {
+            const rows = activities.map(a => {
+                const icon = ACTIVITY_TYPE_ICONS[a.type]
+                    || '<span class="type-dot"></span>';
+                const badge = a.sport_type && a.sport_type !== a.type
+                    ? `${a.type} · ${a.sport_type}`
+                    : (a.type || '-');
+                const powerMain = a.weighted_average_watts ?? a.average_watts;
+                return `
+                <tr data-activity-id="${a.id}" class="row-clickable ${String(a.id) === String(lastAnalyzedActivityId) ? 'analyzing' : ''}" onclick="openActivityAnalysis('${a.id}')">
+                    <td class="act-name-cell"><span class="type-icon">${icon}</span><div class="act-name-text"><span class="act-title">${escapeHtml(a.name)}</span><span class="act-type-badge">${escapeHtml(badge)}</span></div></td>
+                    ${_dateDuoCell(a)}
+                    ${_duo(formatDistance(a.distance), formatTime(a.moving_time), 'text-right')}
                     <td class="text-right">${formatElevation(a.total_elevation_gain)}</td>
-                    <td class="text-right">${formatSpeed(a.average_speed)}</td>
-                    <td class="text-right">${formatSpeed(a.max_speed)}</td>
-                    <td class="text-right">${formatCadence(a.average_cadence)}</td>
-                    <td class="text-right">${formatHeartRate(a.average_heartrate)}</td>
-                    <td class="text-right">${formatHeartRate(a.max_heartrate)}</td>
-                    <td class="text-right">${formatWatts(a.average_watts)}</td>
-                    <td class="text-right">${formatWatts(a.weighted_average_watts)}</td>
-                    <td class="text-right">${formatWatts(a.max_watts)}</td>
+                    ${_duo(formatSpeed(a.average_speed), formatSpeed(a.max_speed), 'text-right')}
+                    ${_duo(formatHeartRate(a.average_heartrate), formatHeartRate(a.max_heartrate), 'text-right')}
+                    ${columnFlags.hasCadence ? `<td class="text-right">${formatCadence(a.average_cadence)}</td>` : ''}
+                    ${columnFlags.hasPower ? _duo(formatWatts(powerMain), formatWatts(a.max_watts), 'text-right') : ''}
                     <td class="text-right">${formatSufferScore(a.suffer_score)}</td>
-                    <td><button class="btn-analyze" onclick="openActivityAnalysis('${a.id}')">分析</button></td>
+                    <td class="row-actions" onclick="event.stopPropagation()">
+                        <button class="row-btn" title="查看分析" onclick="openActivityAnalysis('${a.id}')">分析</button>
+                        <button class="row-btn" title="在地图上查看轨迹" onclick="openActivityOnMap('${a.id}')">轨迹</button>
+                    </td>
                 </tr>
-            `).join('');
+            `;
+            }).join('');
 
             return `
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>ID</th>
-                            <th>名称</th>
-                            <th>类型</th>
-                            <th>运动类型</th>
-                            <th>开始时间</th>
-                            <th class="text-right">距离</th>
-                            <th class="text-right">移动时间</th>
-                            <th class="text-right">爬升</th>
-                            <th class="text-right">平均速度</th>
-                            <th class="text-right">最大速度</th>
-                            <th class="text-right">平均踏频</th>
-                            <th class="text-right">平均心率</th>
-                            <th class="text-right">最大心率</th>
-                            <th class="text-right">平均功率</th>
-                            <th class="text-right">标准化功率</th>
-                            <th class="text-right">最大功率</th>
-                            <th class="text-right">强度评分</th>
-                            <th>操作</th>
+                            <th class="act-name-col">活动</th>
+                            ${_sortTh('时间', 'date')}
+                            ${_sortTh('距离 / 时长', 'distance', 'text-right')}
+                            ${_sortTh('爬升', 'elevation', 'text-right')}
+                            ${_sortTh('速度', 'avg_speed', 'text-right')}
+                            ${_sortTh('心率', 'avg_hr', 'text-right')}
+                            ${columnFlags.hasCadence ? '<th class="text-right">踏频</th>' : ''}
+                            ${columnFlags.hasPower ? _sortTh('功率', 'power', 'text-right') : ''}
+                            ${_sortTh('强度', 'suffer', 'text-right')}
+                            <th class="row-actions-col">操作</th>
                         </tr>
                     </thead>
                     <tbody>${rows}</tbody>
                 </table>
+            `;
+        }
+
+        // 筛选结果汇总条：与图表页汇总卡同口径
+        function buildListSummary(filtered) {
+            const km = filtered.reduce((s, a) => s + (a.distance || 0), 0) / 1000;
+            const hours = filtered.reduce((s, a) => s + (a.moving_time || 0), 0) / 3600;
+            const elev = filtered.reduce((s, a) => s + (a.total_elevation_gain || 0), 0);
+            return `
+                <div class="list-summary">
+                    <span class="ls-item"><b>${filtered.length.toLocaleString()}</b> 次活动</span>
+                    <span class="ls-item"><b>${km >= 100 ? Math.round(km).toLocaleString() : km.toFixed(1)}</b> km</span>
+                    <span class="ls-item"><b>${Math.round(hours).toLocaleString()}</b> h 移动时长</span>
+                    <span class="ls-item"><b>${Math.round(elev).toLocaleString()}</b> m 爬升</span>
+                </div>
             `;
         }
 
@@ -227,10 +301,6 @@ function buildScrollableTable(html) {
             if (activityPage > totalPages) activityPage = totalPages;
             if (activityPage < 1) activityPage = 1;
 
-            const start = (activityPage - 1) * activityPageSize;
-            const end = start + activityPageSize;
-            const pageActivities = filtered.slice(start, end);
-
             const filtersHtml = buildActivityFilters();
 
             // 筛选后没有结果时给出可操作的空态，而不是渲染一张空表
@@ -244,9 +314,27 @@ function buildScrollableTable(html) {
                 return;
             }
 
-            const tableHtml = buildScrollableTable(buildActivityTable(pageActivities));
+            // 排序（默认时间倒序）
+            const getter = ACTIVITY_SORT_KEYS[activitySort.key];
+            if (getter) {
+                const dir = activitySort.order === 'asc' ? 1 : -1;
+                filtered.sort((x, y) => dir * (getter(x) - getter(y)));
+            }
+
+            // 按筛选结果动态决定列：无骑行类活动隐藏踏频，无功率数据隐藏功率
+            const columnFlags = {
+                hasCadence: filtered.some(a => (a.type || '').includes('Ride')),
+                hasPower: filtered.some(a =>
+                    a.average_watts || a.weighted_average_watts || a.max_watts),
+            };
+
+            const start = (activityPage - 1) * activityPageSize;
+            const pageActivities = filtered.slice(start, start + activityPageSize);
+
+            const summaryHtml = buildListSummary(filtered);
+            const tableHtml = buildScrollableTable(buildActivityTable(pageActivities, columnFlags));
             const paginationHtml = buildPaginationControls(total);
-            setHtml('活动列表', filtersHtml + tableHtml + paginationHtml);
+            setHtml('活动列表', filtersHtml + summaryHtml + tableHtml + paginationHtml);
             initTableScrollSync();
 
             if (shouldRestoreScroll && lastAnalyzedActivityId) {
@@ -282,11 +370,14 @@ function buildScrollableTable(html) {
             setActiveMenu(btn);
             setLoading('活动列表（正在同步，请稍候）...');
 
-            // 从路由参数恢复列表本地状态（分页 / 类型 / 关键字）
+            // 从路由参数恢复列表本地状态（分页 / 类型 / 关键字 / 排序）
             const params = currentRoute ? currentRoute.params : {};
             activityFilters = { type: params.type || '', keyword: params.q || '' };
             activityPage = Math.max(1, parseInt(params.page || '1', 10) || 1);
             activityPageSize = parseInt(params.pageSize || '20', 10) || 20;
+            activitySort = ACTIVITY_SORT_KEYS[params.sort]
+                ? { key: params.sort, order: params.order === 'asc' ? 'asc' : 'desc' }
+                : { key: 'date', order: 'desc' };
 
             // 「返回列表」时定位到刚分析过的活动所在页
             if (params.focus) {

@@ -470,6 +470,29 @@ function createChart(key, ctx, config) {
             return (distance_km || []).map(d => Number(d).toFixed(1));
         }
 
+        // 爬坡段红色底纹插件：直接画在海拔剖面图上（替代独立的双轴联动图）
+        function _climbBandPlugin(climbSegments, distanceKm) {
+            return {
+                id: 'climbBands',
+                beforeDatasetsDraw(chart) {
+                    if (!climbSegments || !climbSegments.length) return;
+                    const { ctx, chartArea, scales } = chart;
+                    const x = scales.x;
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(239, 68, 68, 0.12)';
+                    climbSegments.forEach(c => {
+                        const i0 = distanceKm.findIndex(d => d >= c.start_km);
+                        const i1 = distanceKm.findIndex(d => d >= c.end_km);
+                        if (i0 < 0 || i1 < 0 || i1 <= i0) return;
+                        const px0 = x.getPixelForValue(i0);
+                        const px1 = x.getPixelForValue(i1);
+                        ctx.fillRect(px0, chartArea.top, px1 - px0, chartArea.bottom - chartArea.top);
+                    });
+                    ctx.restore();
+                }
+            };
+        }
+
         function _mkAnalysisGradient(ctx, colorStart, colorEnd) {
             const gradient = ctx.createLinearGradient(0, 0, 0, 260);
             gradient.addColorStop(0, colorStart);
@@ -482,6 +505,7 @@ function createChart(key, ctx, config) {
             const labels = _analysisDistanceLabels(data.distance_km);
             const altitudes = (data.altitude || []).map(v => Number(v) || 0);
             const gradient = _mkAnalysisGradient(ctx, 'rgba(34, 197, 94, 0.5)', 'rgba(34, 197, 94, 0.05)');
+            const climbs = (data.summary && data.summary.climb_segments) || [];
             createChart('analysis:elevation', ctx, {
                 type: 'line',
                 data: {
@@ -504,10 +528,11 @@ function createChart(key, ctx, config) {
                     interaction: { mode: 'index', intersect: false },
                     plugins: { legend: { display: false } },
                     scales: {
-                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
+                        x: { grid: { display: false }, ticks: { maxTicksLimit: 10, maxRotation: 0, color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
                         y: { beginAtZero: false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '海拔 (m)', color: '#999', font: { size: 12 } } }
                     }
-                }
+                },
+                plugins: [_climbBandPlugin(climbs, data.distance_km || [])]
             });
         }
 
@@ -548,9 +573,9 @@ function createChart(key, ctx, config) {
                     responsive: true,
                     maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
-                    plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 6, font: { size: 11 } } } },
+                    plugins: { legend: { display: false } },
                     scales: {
-                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
+                        x: { grid: { display: false }, ticks: { maxTicksLimit: 8, maxRotation: 0, color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
                         y: { beginAtZero: false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '心率 (bpm)', color: '#999', font: { size: 12 } } }
                     }
                 }
@@ -594,9 +619,9 @@ function createChart(key, ctx, config) {
                     responsive: true,
                     maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
-                    plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 6, font: { size: 11 } } } },
+                    plugins: { legend: { display: false } },
                     scales: {
-                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
+                        x: { grid: { display: false }, ticks: { maxTicksLimit: 8, maxRotation: 0, color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
                         y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '速度 (km/h)', color: '#999', font: { size: 12 } } }
                     }
                 }
@@ -644,111 +669,10 @@ function createChart(key, ctx, config) {
                     responsive: true,
                     maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
-                    plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 6, font: { size: 11 } } } },
+                    plugins: { legend: { display: false } },
                     scales: {
-                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
+                        x: { grid: { display: false }, ticks: { maxTicksLimit: 8, maxRotation: 0, color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
                         y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '功率 (W)', color: '#999', font: { size: 12 } } }
-                    }
-                }
-            });
-        }
-
-        function renderHRPowerOverlay(data) {
-            const ctx = document.getElementById('hrPowerCanvas').getContext('2d');
-            const labels = _analysisDistanceLabels(data.distance_km);
-            const hr = (data.heartrate || []).map(v => Number(v) || 0);
-            const watts = (data.watts || []).map(v => Number(v) || 0);
-            createChart('analysis:hrPower', ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: '心率 (bpm)',
-                            data: hr,
-                            borderColor: '#ef4444',
-                            backgroundColor: 'transparent',
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            pointHoverRadius: 4,
-                            tension: 0.3,
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: '功率 (W)',
-                            data: watts,
-                            borderColor: '#f97316',
-                            backgroundColor: 'transparent',
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            pointHoverRadius: 4,
-                            tension: 0.3,
-                            yAxisID: 'y1'
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 6, font: { size: 11 } } } },
-                    scales: {
-                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
-                        y: { type: 'linear', display: true, position: 'left', grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#ef4444', font: { size: 12 } }, title: { display: true, text: '心率 (bpm)', color: '#ef4444', font: { size: 12 } } },
-                        y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#f97316', font: { size: 12 } }, title: { display: true, text: '功率 (W)', color: '#f97316', font: { size: 12 } } }
-                    }
-                }
-            });
-        }
-
-        function renderElevationGrade(data) {
-            const ctx = document.getElementById('elevationGradeCanvas').getContext('2d');
-            const labels = _analysisDistanceLabels(data.distance_km);
-            const altitude = (data.altitude || []).map(v => Number(v) || 0);
-            const grade = (data.grade || []).map(v => Number(v) || 0);
-            const climbs = data.summary && data.summary.climb_segments ? data.summary.climb_segments : [];
-            // 高亮爬坡段：构造背景色数组
-            const climbColors = grade.map((g, i) => {
-                const km = Number(data.distance_km[i]) || 0;
-                const inClimb = climbs.some(c => km >= c.start_km && km <= c.end_km);
-                return g > 5 || inClimb ? 'rgba(239, 68, 68, 0.6)' : 'rgba(34, 197, 94, 0.25)';
-            });
-            createChart('analysis:elevationGrade', ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: '坡度 (%)',
-                            data: grade,
-                            backgroundColor: climbColors,
-                            borderWidth: 0,
-                            yAxisID: 'y1'
-                        },
-                        {
-                            type: 'line',
-                            label: '海拔 (m)',
-                            data: altitude,
-                            borderColor: '#16a34a',
-                            backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            pointHoverRadius: 4,
-                            tension: 0.3,
-                            fill: false,
-                            yAxisID: 'y'
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 6, font: { size: 11 } } } },
-                    scales: {
-                        x: { grid: { display: false }, ticks: { color: '#666', font: { size: 11 } }, title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } } },
-                        y: { type: 'linear', display: true, position: 'left', grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#16a34a', font: { size: 12 } }, title: { display: true, text: '海拔 (m)', color: '#16a34a', font: { size: 12 } } },
-                        y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#666', font: { size: 12 } }, title: { display: true, text: '坡度 (%)', color: '#666', font: { size: 12 } } }
                     }
                 }
             });
@@ -802,11 +726,27 @@ function createChart(key, ctx, config) {
         function renderAnalysisCharts(data) {
             destroyAnalysisCharts();
             renderActivityRouteMap(data);
-            renderElevationProfile(data);
-            renderHRCurve(data);
-            renderSpeedCurve(data);
-            renderPowerCurve(data);
-            renderHRPowerOverlay(data);
-            renderElevationGrade(data);
-            renderHRZoneDistribution(data);
+
+            // 空态降级：无对应数据的卡整卡隐藏，不再留空白占位
+            const hasAlt = (data.altitude || []).some(v => v !== null && v !== undefined);
+            const hasHR = data.has_hr && (data.heartrate || []).some(v => v !== null);
+            const hasWatts = data.has_watts && (data.watts || []).some(v => v !== null);
+            const hasSpeed = (data.velocity_kmh || []).some(v => v !== null);
+            const zoneStats = data.hr_zone_stats || [];
+            _toggleAnalysisCard('elevationCard', hasAlt);
+            _toggleAnalysisCard('hrCard', hasHR);
+            _toggleAnalysisCard('powerCard', hasWatts);
+            _toggleAnalysisCard('speedCard', hasSpeed);
+            _toggleAnalysisCard('hrZoneCard', zoneStats.length > 0);
+
+            if (hasAlt) renderElevationProfile(data);
+            if (hasHR) renderHRCurve(data);
+            if (hasSpeed) renderSpeedCurve(data);
+            if (hasWatts) renderPowerCurve(data);
+            if (zoneStats.length) renderHRZoneDistribution(data);
+        }
+
+        function _toggleAnalysisCard(id, show) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = show ? '' : 'none';
         }

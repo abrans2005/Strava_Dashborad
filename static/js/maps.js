@@ -210,10 +210,13 @@
             drawStartEndMarkers(map, points);
             map.fitBounds(L.latLngBounds(points), { padding: [24, 24] });
 
-            const legend = document.createElement('div');
-            legend.className = 'route-legend';
-            legend.innerHTML = buildRouteLegendHtml();
-            el.appendChild(legend);
+            // 分析页地图的坡度图例由卡片底部 chips 承担，不再挂浮层
+            if (!el.classList.contains('route-map-activity')) {
+                const legend = document.createElement('div');
+                legend.className = 'route-legend';
+                legend.innerHTML = buildRouteLegendHtml();
+                el.appendChild(legend);
+            }
 
             activityRouteMapInstance = map;
             setTimeout(() => map.invalidateSize(), 60);
@@ -288,6 +291,10 @@
 
             const routes = data.routes || [];
             const bounds = [];
+            // 从活动列表「轨迹」按钮跳转过来时，高亮该活动并放大到它的范围
+            const focusId = currentRoute && currentRoute.params.focus
+                ? String(currentRoute.params.focus) : null;
+            let focusPoints = null;
             // 轨迹越多画得越淡，重叠处自然累积成更深的蓝色，形成热力效果
             const opacity = routes.length > 800 ? 0.10
                 : routes.length > 300 ? 0.16
@@ -298,19 +305,25 @@
             routes.forEach(route => {
                 const points = (route.points || []).map(toMapCoord).filter(Boolean);
                 if (points.length < 2) return;
+                const isFocus = focusId && String(route.id) === focusId;
                 L.polyline(points, {
-                    color: ROUTE_COLOR,
-                    weight: weight,
-                    opacity: opacity,
+                    color: isFocus ? '#fc4c02' : ROUTE_COLOR,
+                    weight: isFocus ? 5 : weight,
+                    opacity: isFocus ? 0.95 : opacity,
                     lineCap: 'round'
                 }).addTo(routeMapLayerGroup).bindTooltip(
                     `${escapeHtml(route.name || '')}<br>${formatActivityDate(route)}<br>${route.distance_km || 0} km`,
                     { sticky: true }
                 );
                 points.forEach(p => bounds.push(p));
+                if (isFocus) focusPoints = points;
             });
 
-            if (bounds.length) {
+            if (focusPoints) {
+                routeMapInstance.fitBounds(L.latLngBounds(focusPoints), {
+                    padding: [40, 40], maxZoom: 15,
+                });
+            } else if (bounds.length) {
                 routeMapInstance.fitBounds(L.latLngBounds(bounds), { padding: [24, 24] });
             }
 

@@ -183,6 +183,7 @@ function buildZonesPanel(zonesData) {
 
             return `
                 <div id="athlete-profile-section"></div>
+                <div class="section-title">概览</div>
                 <div class="metric-chips" id="metric-chips">${chips}</div>
                 <div id="chart-summary" class="summary-cards"></div>
                 <div class="chart-card">
@@ -190,21 +191,23 @@ function buildZonesPanel(zonesData) {
                         <canvas id="chartCanvas"></canvas>
                     </div>
                 </div>
-                <div class="chart-row">
-                    <div class="chart-card">
-                        <div class="chart-title">平均功率分布</div>
+                <div class="section-title">分布</div>
+                <div class="chart-row" id="dist-row">
+                    <div class="chart-card" id="power-dist-card">
+                        <div class="chart-title" id="power-dist-title">平均功率分布</div>
                         <div class="chart-wrapper" style="height:280px;">
                             <canvas id="powerDistCanvas"></canvas>
                         </div>
                     </div>
-                    <div class="chart-card">
-                        <div class="chart-title">心率区间分布</div>
+                    <div class="chart-card" id="hr-zone-card">
+                        <div class="chart-title" id="hr-zone-title">心率区间分布</div>
                         <div class="chart-wrapper" style="height:280px;">
                             <canvas id="hrZoneCanvas"></canvas>
                         </div>
                     </div>
                 </div>
-                <div class="chart-row" style="margin-top:20px;">
+                <div class="section-title">排行榜</div>
+                <div class="chart-row">
                     <div class="chart-card">
                         <div class="chart-title" id="top-elevation-title">骑行爬升 TOP20</div>
                         <div class="chart-wrapper" style="height:520px;">
@@ -420,11 +423,37 @@ function buildZonesPanel(zonesData) {
                     renderChart(labels, series, metric || data.metric || 'metric');
                 }
 
-                if (powerRes.ok) {
-                    renderPowerDist(powerData);
+                // 分布区空态降级：无数据整卡隐藏，样本太少显示角标
+                const powerHasData = powerRes.ok && Array.isArray(powerData.labels) && powerData.labels.length > 0;
+                const hrHasData = hrRes.ok && Array.isArray(hrData.labels) && hrData.labels.length > 0;
+                const distRow = document.getElementById('dist-row');
+                const powerCard = document.getElementById('power-dist-card');
+                const hrCard = document.getElementById('hr-zone-card');
+                if (powerCard) powerCard.style.display = powerHasData ? '' : 'none';
+                if (hrCard) hrCard.style.display = hrHasData ? '' : 'none';
+                if (distRow) distRow.style.display = (powerHasData || hrHasData) ? '' : 'none';
+                if (powerHasData) {
+                    const samples = (powerData.counts || []).reduce((s, v) => s + (Number(v) || 0), 0);
+                    const powerTitle = document.getElementById('power-dist-title');
+                    if (powerTitle) {
+                        // 先清掉上一轮的角标，样本 < 5 时重新插入
+                        powerTitle.querySelector('.sample-badge')?.remove();
+                        if (samples < 5) {
+                            powerTitle.insertAdjacentHTML(
+                                'beforeend', '<span class="sample-badge">样本不足</span>');
+                        }
+                    }
                 }
-                if (hrRes.ok) {
+
+                if (powerHasData) {
+                    renderPowerDist(powerData);
+                } else {
+                    ChartRegistry.destroy('power');
+                }
+                if (hrHasData) {
                     renderHRZones(hrData);
+                } else {
+                    ChartRegistry.destroy('hr');
                 }
                 if (topElevationRes.ok) {
                     renderTopElevation(topElevationData);
