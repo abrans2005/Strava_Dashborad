@@ -455,6 +455,168 @@ body {
     height: 380px;
 }
 
+/* ===== 排行榜（HTML 列表） ===== */
+.chart-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.chart-card-head .chart-title {
+    margin-bottom: 0;
+}
+
+.rank-toggle {
+    font-size: 11px;
+    color: #5a636e;
+    background: #f4f5f7;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 3px 10px;
+    cursor: pointer;
+    transition: all 0.15s var(--ease, ease);
+}
+
+.rank-toggle:hover {
+    color: #fc4c02;
+    border-color: rgba(252, 76, 2, 0.3);
+}
+
+.rank-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.rank-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s var(--ease, ease);
+}
+
+.rank-row:hover {
+    background: #f7f8fa;
+}
+
+.rank-row.rank-extra {
+    display: none;
+}
+
+.rank-list.expanded .rank-row.rank-extra {
+    display: flex;
+}
+
+.rank-badge {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #8a919c;
+    background: #f4f5f7;
+    font-variant-numeric: tabular-nums;
+}
+
+.rank-badge.top1 {
+    background: #fef3c7;
+    color: #b45309;
+}
+
+.rank-badge.top2 {
+    background: #eef1f5;
+    color: #64748b;
+}
+
+.rank-badge.top3 {
+    background: #fdece0;
+    color: #c2410c;
+}
+
+.rank-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.rank-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1f2329;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rank-row:hover .rank-name {
+    color: #fc4c02;
+}
+
+.rank-meta {
+    font-size: 11px;
+    color: #8a919c;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.rank-bar-wrap {
+    flex-shrink: 0;
+    width: 104px;
+    height: 8px;
+    border-radius: 999px;
+    background: #f0f2f5;
+    overflow: hidden;
+}
+
+.rank-bar {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.3s var(--ease, ease);
+}
+
+.rank-bar.green {
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.85), rgba(22, 163, 74, 0.35));
+}
+
+.rank-bar.orange {
+    background: linear-gradient(90deg, rgba(252, 76, 2, 0.85), rgba(252, 76, 2, 0.35));
+}
+
+.rank-value {
+    flex-shrink: 0;
+    min-width: 74px;
+    text-align: right;
+    font-size: 13px;
+    font-weight: 700;
+    color: #1f2329;
+    font-variant-numeric: tabular-nums;
+}
+
+.rank-row .rank-badge.top1 ~ .rank-value {
+    color: #b45309;
+}
+
+@media (max-width: 640px) {
+    .rank-bar-wrap {
+        display: none;
+    }
+    .rank-value {
+        min-width: 64px;
+    }
+}
+
 /* 线路热图 */
 .route-map {
     position: relative;

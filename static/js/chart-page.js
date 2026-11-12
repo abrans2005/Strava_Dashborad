@@ -209,16 +209,18 @@ function buildZonesPanel(zonesData) {
                 <div class="section-title">排行榜</div>
                 <div class="chart-row">
                     <div class="chart-card">
-                        <div class="chart-title" id="top-elevation-title">骑行爬升 TOP20</div>
-                        <div class="chart-wrapper" style="height:520px;">
-                            <canvas id="topElevationCanvas"></canvas>
+                        <div class="chart-card-head">
+                            <div class="chart-title" id="top-elevation-title">骑行爬升 TOP20</div>
+                            <button class="rank-toggle" onclick="toggleRankRows(this)">TOP20</button>
                         </div>
+                        <div class="rank-list" id="topElevationList"></div>
                     </div>
                     <div class="chart-card">
-                        <div class="chart-title" id="top-distance-title">骑行里程 TOP20</div>
-                        <div class="chart-wrapper" style="height:520px;">
-                            <canvas id="topDistanceCanvas"></canvas>
+                        <div class="chart-card-head">
+                            <div class="chart-title" id="top-distance-title">骑行里程 TOP20</div>
+                            <button class="rank-toggle" onclick="toggleRankRows(this)">TOP20</button>
                         </div>
+                        <div class="rank-list" id="topDistanceList"></div>
                     </div>
                 </div>
             `;

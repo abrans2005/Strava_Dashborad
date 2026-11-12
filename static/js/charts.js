@@ -316,148 +316,82 @@ function createChart(key, ctx, config) {
             return name.slice(0, maxLen) + '…';
         }
 
-        function _buildTopActivityTooltip(activity) {
-            return [
-                `距离: ${formatDistance(activity.distance)}`,
-                `爬升: ${formatElevation(activity.total_elevation_gain)}`,
-                `移动时间: ${formatTime(activity.moving_time)}`,
-                `平均速度: ${formatSpeed(activity.average_speed)}`,
-                `平均心率: ${formatHeartRate(activity.average_heartrate)}`,
-                `最大功率: ${formatWatts(activity.average_watts)}`,
-                `开始时间: ${formatActivityDate(activity)}`
-            ];
+        // --- 排行榜：HTML 列表（奖牌、迷你条、可点击进分析） ---
+        function _rankRowHtml(item, index, maxVal, valueNum, valueText, tone) {
+            const d = activityStartDate(item);
+            const dateStr = d ? `${d.getMonth() + 1}/${d.getDate()}` : '';
+            const meta = [dateStr, item.sport_type || item.type].filter(Boolean).join(' · ');
+            const pct = maxVal > 0 ? Math.max(1.5, (valueNum / maxVal) * 100) : 0;
+            const rankCls = index === 0 ? 'top1' : index === 1 ? 'top2' : index === 2 ? 'top3' : '';
+            return `
+                <div class="rank-row${index >= 10 ? ' rank-extra' : ''}" onclick="openActivityAnalysis('${item.id}')">
+                    <span class="rank-badge ${rankCls}">${index + 1}</span>
+                    <span class="rank-info">
+                        <span class="rank-name">${escapeHtml(_truncateName(item.name, 26))}</span>
+                        ${meta ? `<span class="rank-meta">${escapeHtml(meta)}</span>` : ''}
+                    </span>
+                    <span class="rank-bar-wrap"><span class="rank-bar ${tone}" style="width:${pct.toFixed(1)}%;"></span></span>
+                    <span class="rank-value">${valueText}</span>
+                </div>
+            `;
+        }
+
+        function _renderRankList(containerId, chartKey, items, valueNum, valueText, tone, emptyTitle) {
+            const el = document.getElementById(containerId);
+            if (!el) return;
+            ChartRegistry.destroy(chartKey); // 清理旧 canvas 版本残留的实例
+
+            if (!items.length) {
+                el.innerHTML = buildStateBlock({
+                    icon: 'empty',
+                    title: emptyTitle,
+                    desc: '当前筛选条件下没有可比的活动。',
+                });
+                const t = el.parentElement.querySelector('.rank-toggle');
+                if (t) t.style.display = 'none';
+                return;
+            }
+
+            const max = Math.max(...items.map(valueNum), 1);
+            el.innerHTML = items
+                .map((it, i) => _rankRowHtml(it, i, max, valueNum(it), valueText(it), tone))
+                .join('');
+            el.classList.remove('expanded');
+
+            const btn = el.parentElement.querySelector('.rank-toggle');
+            if (btn) {
+                btn.style.display = items.length > 10 ? '' : 'none';
+                btn.textContent = 'TOP20';
+            }
+        }
+
+        function toggleRankRows(btn) {
+            const list = btn.closest('.chart-card').querySelector('.rank-list');
+            if (!list) return;
+            const expanded = list.classList.toggle('expanded');
+            btn.textContent = expanded ? '收起' : 'TOP20';
         }
 
         function renderTopElevation(data) {
-            const ctx = document.getElementById('topElevationCanvas').getContext('2d');
-            const items = Array.isArray(data) ? data : [];
-            if (items.length === 0) {
-                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-                return;
-            }
-
-            // 横柱状图：最高的在最上面，所以数组反转为升序，配合 y reverse
-            const chartData = [...items].reverse();
-            const labels = chartData.map(a => _truncateName(a.name));
-            const values = chartData.map(a => a.total_elevation_gain || 0);
-
-            // 单色柱，第一名（反转后为最后一项）加深强调
-            const top1 = chartData.length - 1;
-            const barColors = chartData.map((_, i) =>
-                i === top1 ? 'rgba(22, 163, 74, 0.95)' : 'rgba(34, 197, 94, 0.45)');
-
-            createChart('topElevation', ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: '爬升 (m)',
-                        data: values,
-                        backgroundColor: barColors,
-                        borderColor: 'transparent',
-                        borderWidth: 0,
-                        borderRadius: 5,
-                        borderSkipped: false
-                    }]
-                },
-                options: {
-                    indexAxis: 'y',
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            backgroundColor: 'rgba(40, 40, 40, 0.9)',
-                            titleFont: { size: 13 },
-                            bodyFont: { size: 13 },
-                            padding: 10,
-                            cornerRadius: 8,
-                            callbacks: {
-                                title: (ctx) => ctx[0] ? items[items.length - 1 - ctx[0].dataIndex].name : '',
-                                label: (ctx) => _buildTopActivityTooltip(items[items.length - 1 - ctx.dataIndex])
-                            }
-                        }
-                    },
-                    scales: {
-                        x: {
-                            beginAtZero: true,
-                            grid: { color: 'rgba(0,0,0,0.05)' },
-                            ticks: { color: '#666', font: { size: 11 } },
-                            title: { display: true, text: '爬升 (m)', color: '#999', font: { size: 12 } }
-                        },
-                        y: {
-                            grid: { display: false },
-                            ticks: { color: '#555', font: { size: 12 } },
-                            reverse: true
-                        }
-                    }
-                }
-            });
+            _renderRankList(
+                'topElevationList', 'topElevation',
+                Array.isArray(data) ? data : [],
+                a => a.total_elevation_gain || 0,
+                a => Math.round(a.total_elevation_gain || 0).toLocaleString() + ' m',
+                'green',
+                '暂无爬升排行'
+            );
         }
 
         function renderTopDistance(data) {
-            const ctx = document.getElementById('topDistanceCanvas').getContext('2d');
-            const items = Array.isArray(data) ? data : [];
-            if (items.length === 0) {
-                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-                return;
-            }
-
-            const chartData = [...items].reverse();
-            const labels = chartData.map(a => _truncateName(a.name));
-            const values = chartData.map(a => (a.distance || 0) / 1000);
-
-            const top1 = chartData.length - 1;
-            const barColors = chartData.map((_, i) =>
-                i === top1 ? 'rgba(252, 76, 2, 0.95)' : 'rgba(252, 76, 2, 0.45)');
-
-            createChart('topDistance', ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: '距离 (km)',
-                        data: values,
-                        backgroundColor: barColors,
-                        borderColor: 'transparent',
-                        borderWidth: 0,
-                        borderRadius: 5,
-                        borderSkipped: false
-                    }]
-                },
-                options: {
-                    indexAxis: 'y',
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            backgroundColor: 'rgba(40, 40, 40, 0.9)',
-                            titleFont: { size: 13 },
-                            bodyFont: { size: 13 },
-                            padding: 10,
-                            cornerRadius: 8,
-                            callbacks: {
-                                title: (ctx) => ctx[0] ? items[items.length - 1 - ctx[0].dataIndex].name : '',
-                                label: (ctx) => _buildTopActivityTooltip(items[items.length - 1 - ctx.dataIndex])
-                            }
-                        }
-                    },
-                    scales: {
-                        x: {
-                            beginAtZero: true,
-                            grid: { color: 'rgba(0,0,0,0.05)' },
-                            ticks: { color: '#666', font: { size: 11 } },
-                            title: { display: true, text: '距离 (km)', color: '#999', font: { size: 12 } }
-                        },
-                        y: {
-                            grid: { display: false },
-                            ticks: { color: '#555', font: { size: 12 } },
-                            reverse: true
-                        }
-                    }
-                }
-            });
+            _renderRankList(
+                'topDistanceList', 'topDistance',
+                Array.isArray(data) ? data : [],
+                a => a.distance || 0,
+                a => ((a.distance || 0) / 1000).toFixed(1) + ' km',
+                'orange',
+                '暂无里程排行'
+            );
         }
 
         // --- 活动流数据分析 ---
