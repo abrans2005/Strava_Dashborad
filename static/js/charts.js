@@ -62,37 +62,102 @@ function createChart(key, ctx, config) {
 })();
 
 
+        // 尾部滚动均值（默认 12 个月），用于十年趋势参考线
+        function _rollingMean(values, window) {
+            const out = [];
+            let sum = 0;
+            for (let i = 0; i < values.length; i++) {
+                sum += values[i];
+                if (i >= window) sum -= values[i - window];
+                out.push(i >= window - 1 ? +(sum / window).toFixed(2) : null);
+            }
+            return out;
+        }
+
+        // 峰值标注：只在最高的那根柱上标数值，给眼睛一个锚点
+        function _peakValuePlugin(values, formatter) {
+            return {
+                id: 'peakValue',
+                afterDatasetsDraw(chart) {
+                    const maxVal = Math.max(...values, 0);
+                    if (!maxVal) return;
+                    const idx = values.indexOf(maxVal);
+                    const meta = chart.getDatasetMeta(0);
+                    const el = meta && meta.data ? meta.data[idx] : null;
+                    if (!el) return;
+                    const { ctx } = chart;
+                    ctx.save();
+                    ctx.font = '700 11px -apple-system, "PingFang SC", sans-serif';
+                    ctx.fillStyle = '#fc4c02';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    ctx.fillText(formatter(maxVal), el.x, el.y - 6);
+                    ctx.restore();
+                }
+            };
+        }
+
+        function _metricUnit(metric) {
+            return {
+                count: ' 次',
+                distance_km: ' km',
+                moving_time_hours: ' h',
+                elevation_gain_m: ' m'
+            }[metric] || '';
+        }
+
         function renderChart(labels, series, metric) {
             const ctx = document.getElementById('chartCanvas').getContext('2d');
             const values = (series[metric] || []).map(v => Number(v) || 0);
-            const isLine = metric === 'elevation_gain_m';
             const label = metricLabels[metric] || metric;
+            const unit = _metricUnit(metric);
 
-            // 渐变色背景
-            const gradient = ctx.createLinearGradient(0, 0, 0, 380);
-            gradient.addColorStop(0, 'rgba(252, 76, 2, 0.45)');
-            gradient.addColorStop(1, 'rgba(252, 76, 2, 0.05)');
+            // 年度交替配色：奇偶年深浅橙色交替，130 根密柱立刻有年度节奏
+            const years = labels.map(l => String(l).slice(0, 4));
+            const barColors = years.map(y => Number(y) % 2 === 0
+                ? 'rgba(252, 76, 2, 0.78)'
+                : 'rgba(252, 76, 2, 0.42)');
+
+            // 12 个月滚动均值：十年趋势参考
+            const trend = _rollingMean(values, 12);
+            const hasTrend = labels.length >= 13;
+            // x 轴是否含 1 月标签：决定年份标注策略
+            const hasJan = labels.some(l => String(l).slice(5, 7) === '01');
 
             const cfg = {
-                type: isLine ? 'line' : 'bar',
+                type: 'bar',
                 data: {
                     labels: labels,
-                    datasets: [{
-                        label: label,
-                        data: values,
-                        backgroundColor: isLine ? gradient : 'rgba(252, 76, 2, 0.75)',
-                        borderColor: '#fc4c02',
-                        borderWidth: isLine ? 2 : 0,
-                        borderRadius: isLine ? 0 : 4,
-                        borderSkipped: false,
-                        fill: isLine,
-                        tension: isLine ? 0.35 : 0,
-                        pointBackgroundColor: '#fff',
-                        pointBorderColor: '#fc4c02',
-                        pointBorderWidth: 2,
-                        pointRadius: isLine ? 4 : 0,
-                        pointHoverRadius: 6
-                    }]
+                    datasets: [
+                        {
+                            label: label + '（月度）',
+                            data: values,
+                            backgroundColor: barColors,
+                            hoverBackgroundColor: 'rgba(252, 76, 2, 0.95)',
+                            borderColor: 'transparent',
+                            borderWidth: 0,
+                            borderRadius: { topLeft: 2, topRight: 2, bottomLeft: 0, bottomRight: 0 },
+                            borderSkipped: false,
+                            maxBarThickness: 9,
+                            categoryPercentage: 1,
+                            barPercentage: 0.85,
+                            order: 2
+                        },
+                        {
+                            type: 'line',
+                            label: '12 月均值',
+                            data: trend,
+                            borderColor: 'rgba(31, 35, 41, 0.32)',
+                            borderWidth: 1.3,
+                            borderDash: [4, 4],
+                            pointRadius: 0,
+                            pointHoverRadius: 0,
+                            tension: 0.35,
+                            spanGaps: true,
+                            hidden: !hasTrend,
+                            order: 1
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
@@ -110,6 +175,9 @@ function createChart(key, ctx, config) {
                                     return context[0] ? context[0].label : '';
                                 },
                                 label: function (context) {
+                                    if (context.dataset.type === 'line') {
+                                        return `12 月均值: ${context.parsed.y}${unit}`;
+                                    }
                                     const idx = context.dataIndex;
                                     const distance = series.distance_km
                                         ? Number(series.distance_km[idx] || 0).toFixed(2)
@@ -117,11 +185,15 @@ function createChart(key, ctx, config) {
                                     const elevation = series.elevation_gain_m
                                         ? Number(series.elevation_gain_m[idx] || 0).toFixed(0)
                                         : '-';
-                                    return [
-                                        `${label}: ${context.parsed.y}`,
+                                    const lines = [
+                                        `${label}: ${context.parsed.y}${unit}`,
                                         `距离: ${distance} km`,
                                         `爬升: ${elevation} m`
                                     ];
+                                    if (trend[idx] !== null && trend[idx] !== undefined) {
+                                        lines.push(`12 月均值: ${trend[idx]}${unit}`);
+                                    }
+                                    return lines;
                                 }
                             }
                         }
@@ -129,24 +201,171 @@ function createChart(key, ctx, config) {
                     scales: {
                         x: {
                             grid: { display: false },
-                            ticks: { color: '#666', font: { size: 12 } }
+                            ticks: {
+                                autoSkip: false,
+                                maxRotation: 0,
+                                color: '#8a919c',
+                                font: { size: 11 },
+                                // 只在每年 1 月标年份；数据不含 1 月时退回稀疏标注
+                                callback(value, index) {
+                                    const raw = String(this.getLabelForValue(value) || '');
+                                    if (hasJan) {
+                                        return raw.slice(5, 7) === '01' ? raw.slice(0, 4) : '';
+                                    }
+                                    return index % 6 === 0 ? raw : '';
+                                }
+                            }
                         },
                         y: {
                             beginAtZero: true,
+                            grace: '12%',
                             grid: { color: 'rgba(0, 0, 0, 0.05)' },
-                            ticks: { color: '#666', font: { size: 12 } },
+                            ticks: { color: '#8a919c', font: { size: 11 }, maxTicksLimit: 6 },
                             title: {
                                 display: true,
                                 text: label,
-                                color: '#999',
-                                font: { size: 12 }
+                                color: '#b3bac3',
+                                font: { size: 11 }
                             }
                         }
                     }
-                }
+                },
+                plugins: [
+                    _peakValuePlugin(values, v => Math.round(v * 100) / 100 + unit)
+                ]
             };
 
             createChart('main', ctx, cfg);
+
+            // 卡片头部：当前指标总览（累计/月均/峰值）
+            const titleEl = document.getElementById('main-chart-title');
+            if (titleEl) titleEl.textContent = '月度趋势 · ' + label;
+            const metaEl = document.getElementById('main-chart-meta');
+            if (metaEl) {
+                const total = values.reduce((s, v) => s + v, 0);
+                const avg = labels.length ? total / labels.length : 0;
+                let maxIdx = 0;
+                values.forEach((v, i) => { if (v > values[maxIdx]) maxIdx = i; });
+                const fmt = v => Math.round(v * 10) / 10;
+                metaEl.textContent = values.length
+                    ? `累计 ${fmt(total)}${unit} · 月均 ${fmt(avg)}${unit} · 峰值 ${fmt(values[maxIdx])}${unit}（${labels[maxIdx]}）`
+                    : '';
+            }
+        }
+
+        // ===== 年度热力矩阵（行=年，列=月） =====
+
+        let _heatTipEl = null;
+
+        function _heatTooltipEl() {
+            if (!_heatTipEl) {
+                _heatTipEl = document.createElement('div');
+                _heatTipEl.className = 'heat-tip';
+                document.body.appendChild(_heatTipEl);
+            }
+            return _heatTipEl;
+        }
+
+        // 点击格子：把全局筛选切到该月（复用筛选栏逻辑，联动所有图表）
+        function openHeatMonth(label) {
+            const year = Number(String(label).slice(0, 4));
+            const month = Number(String(label).slice(5, 7));
+            if (!year || !month) return;
+            const from = `${year}-${pad2(month)}-01`;
+            const lastDay = new Date(year, month, 0).getDate();
+            const to = `${year}-${pad2(month)}-${pad2(lastDay)}`;
+            updateGlobalFilters({ period: 'custom', from, to });
+        }
+
+        function _bindHeatmapEvents(wrap) {
+            if (wrap.dataset.bound === '1') return;
+            wrap.dataset.bound = '1';
+            const tip = _heatTooltipEl();
+            wrap.addEventListener('mousemove', e => {
+                const cell = e.target.closest('.heat-cell[data-tip]');
+                if (!cell) {
+                    tip.classList.remove('show');
+                    return;
+                }
+                tip.textContent = cell.dataset.tip;
+                tip.classList.add('show');
+                const x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+                const y = Math.max(8, e.clientY - tip.offsetHeight - 12);
+                tip.style.left = x + 'px';
+                tip.style.top = y + 'px';
+            });
+            wrap.addEventListener('mouseleave', () => tip.classList.remove('show'));
+            wrap.addEventListener('click', e => {
+                const cell = e.target.closest('.heat-cell[data-label]');
+                if (cell) openHeatMonth(cell.dataset.label);
+            });
+        }
+
+        function renderYearHeatmap(labels, series, metric) {
+            const card = document.getElementById('heat-card');
+            const wrap = document.getElementById('year-heatmap');
+            if (!card || !wrap) return;
+            if (!labels || !labels.length) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = '';
+
+            const values = (series[metric] || []).map(v => Number(v) || 0);
+            const unit = _metricUnit(metric);
+            const metricName = metricLabels[metric] || metric;
+
+            // 按年分组：每年 12 个格子，缺失月份留空
+            const byYear = new Map();
+            labels.forEach((label, i) => {
+                const y = String(label).slice(0, 4);
+                const m = Number(String(label).slice(5, 7));
+                if (!byYear.has(y)) byYear.set(y, new Array(12).fill(null));
+                byYear.get(y)[m - 1] = { value: values[i], label };
+            });
+
+            const maxVal = Math.max(...values, 0);
+            // sqrt 压缩色阶：小值也可见，大值不被压平
+            const heatAlpha = v => (maxVal && v > 0
+                ? (0.14 + 0.8 * Math.sqrt(v / maxVal)).toFixed(3)
+                : 0.06);
+
+            const monthHead = Array.from({ length: 12 }, (_, i) =>
+                `<span class="heat-month">${i + 1}</span>`).join('');
+
+            const rows = [...byYear.entries()].map(([year, cells]) => {
+                const cellHtml = cells.map((c, i) => {
+                    if (!c) return '<span class="heat-cell"></span>';
+                    const v = Math.round(c.value * 10) / 10;
+                    const tip = `${year} 年 ${i + 1} 月 · ${v}${unit}`;
+                    return `<button type="button" class="heat-cell" data-label="${c.label}"
+                                data-tip="${tip}" style="--v:${heatAlpha(c.value)}"
+                                aria-label="${tip}"></button>`;
+                }).join('');
+                return `<div class="heat-row">
+                            <span class="heat-year">${year}</span>
+                            <div class="heat-cells">${cellHtml}</div>
+                        </div>`;
+            }).join('');
+
+            wrap.innerHTML = `
+                <div class="heat-row heat-head">
+                    <span class="heat-year"></span>
+                    <div class="heat-cells">${monthHead}</div>
+                </div>
+                ${rows}
+            `;
+            _bindHeatmapEvents(wrap);
+
+            const legend = document.getElementById('heat-legend');
+            if (legend) {
+                legend.innerHTML = '<span>少</span>' +
+                    [0.2, 0.36, 0.52, 0.7, 0.9]
+                        .map(a => `<i style="background:rgba(252,76,2,${a})"></i>`).join('') +
+                    '<span>多</span>';
+            }
+            const sub = document.getElementById('heat-sub');
+            if (sub) sub.textContent = `每格一个月，颜色越深${metricName}越高 · 点击格子查看该月`;
         }
 
         // ===== 分布图通用插件 =====

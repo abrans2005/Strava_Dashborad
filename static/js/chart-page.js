@@ -187,9 +187,24 @@ function buildZonesPanel(zonesData) {
                 <div class="metric-chips" id="metric-chips">${chips}</div>
                 <div id="chart-summary" class="summary-cards"></div>
                 <div class="chart-card">
+                    <div class="main-chart-head">
+                        <div class="main-chart-title" id="main-chart-title">月度趋势</div>
+                        <div class="main-chart-meta" id="main-chart-meta"></div>
+                        <div class="main-chart-legend">
+                            <span class="lg-item"><i class="lg-swatch lg-bar"></i>月度</span>
+                            <span class="lg-item"><i class="lg-swatch lg-line"></i>12 月均值</span>
+                        </div>
+                    </div>
                     <div class="chart-wrapper">
                         <canvas id="chartCanvas"></canvas>
                     </div>
+                </div>
+                <div class="chart-card heat-card" id="heat-card">
+                    <div class="chart-card-head">
+                        <div class="chart-title">年度热力 <span class="chart-sub" id="heat-sub">每格一个月，颜色越深数值越高</span></div>
+                        <div class="heat-legend" id="heat-legend"></div>
+                    </div>
+                    <div id="year-heatmap" class="year-heatmap"></div>
                 </div>
                 <div class="section-title">分布</div>
                 <div class="chart-row" id="dist-row">
@@ -421,8 +436,11 @@ function buildZonesPanel(zonesData) {
                     ChartRegistry.destroy('main');
                     const emptyCtx = document.getElementById('chartCanvas').getContext('2d');
                     emptyCtx.clearRect(0, 0, emptyCtx.canvas.width, emptyCtx.canvas.height);
+                    renderYearHeatmap([], {}, metric);
                 } else {
-                    renderChart(labels, series, metric || data.metric || 'metric');
+                    const activeMetric = metric || data.metric || 'distance_km';
+                    renderChart(labels, series, activeMetric);
+                    renderYearHeatmap(labels, series, activeMetric);
                 }
 
                 // 分布区空态降级：无数据整卡隐藏，样本太少显示角标
